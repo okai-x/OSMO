@@ -43,6 +43,49 @@ export CONTAINER_REGISTRY_USERNAME="<container registry username>"
 export CONTAINER_REGISTRY_PASSWORD="<container registry password>"
 ```
 
+## Build Prana Images Locally
+
+On a Linux x86_64 host with Docker, Docker Buildx, and Bazelisk (or Bazel), run:
+
+```bash
+./scripts/build-images.sh
+```
+
+The script builds the current checkout with the existing Bazel image targets and
+the Web UI Dockerfile. It loads the images as
+`osmo/<component>:<version>-prana-<commit>` (for example,
+`osmo/service:6.4.0-prana-9a060662`). The platform is `linux/amd64`; tags have no
+`dirty` or architecture suffix. Use `--tag TAG` to choose another tag.
+
+The image set includes service, agent, logger, router, worker, delayed-job-monitor,
+authz-sidecar, mcp, backend-listener, backend-worker, backend-test-runner,
+init-container, client, and web-ui. Third-party dependency image versions are not
+changed. Existing Bazel and Buildx caches are reused.
+
+By default, the script only builds locally. It does not push, create cloud resources,
+or deploy. Each run records its source commit, tracked changes, worktree status,
+image IDs, platform, build log, and CLI version under
+`~/.local/state/osmo-prana-images/<tag>/build.*`. Local edits are included in builds;
+the records preserve that fact without adding `dirty` to the tag. Reusing a tag
+updates the local references, so choose a new tag when retaining an older build.
+
+### Optional Push to GCP Artifact Registry
+
+Create a Docker repository named `osmo` in `asia-southeast1` beforehand and grant
+the pushing identity Artifact Registry Writer access. Configure Docker authentication:
+
+```bash
+gcloud auth configure-docker asia-southeast1-docker.pkg.dev
+./scripts/build-images.sh --push --project pranalab-infra
+```
+
+The script first builds and verifies all local images, then pushes them as
+`asia-southeast1-docker.pkg.dev/pranalab-infra/osmo/<component>:<tag>`.
+Use `--project YOUR_PROJECT_ID` to select another project.
+It records each successful push in `pushed-images.txt` and stops on failure.
+Passing `--project` without `--push` still only builds locally. Authentication,
+repository creation, and deployment remain separate operations.
+
 ## Push OSMO Container Images
 
 ### Building in a containerized environment

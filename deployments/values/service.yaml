@@ -41,6 +41,23 @@ services:
   configs:
     enabled: true
 
+    # Preserve resource templates; deploy-k8s.sh sets the OSMO pull policy.
+    pools:
+      default:
+        common_pod_template:
+          - default_ctrl
+          - default_user
+          - osmo_image_policy
+    podTemplates:
+      osmo_image_policy:
+        spec:
+          initContainers:
+            - name: osmo-init
+              imagePullPolicy: Always
+          containers:
+            - name: osmo-ctrl
+              imagePullPolicy: Always
+
     # services.configs.service.service_base_url is injected via --set by
     # deploy-k8s.sh (gateway DNS name with namespace baked in). No literal
     # default here — the chart auto-derives it from services.service.hostname

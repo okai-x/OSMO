@@ -16,6 +16,7 @@ OSMO_WORKFLOWS_NAMESPACE=osmo-workflows
 OSMO_IMAGE_REGISTRY=nvcr.io/nvstaging/osmo
 OSMO_IMAGE_TAG=contract-test
 OSMO_HELM_REPO_NAME=osmo-release-contract
+OSMO_CHART_DIR=""
 OSMO_CHART_VERSION=1.3.1
 NGC_SECRET_NAME=nvcr-pull
 NGC_API_KEY=contract-test-api-key

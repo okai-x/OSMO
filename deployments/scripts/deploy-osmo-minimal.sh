@@ -215,13 +215,15 @@ Discovery (provider-less, exit after running):
                          user doesn't know which region to target.
 
 Environment Variables:
-  OSMO_IMAGE_REGISTRY    OSMO image registry (default: nvcr.io/nvidia/osmo)
-  OSMO_IMAGE_TAG         OSMO image tag (default: latest = current GA)
-  OSMO_CHART_VERSION     Pin OSMO Helm chart version (default: latest stable
-                         in repo). REQUIRED for prerelease channels — chart
-                         RCs are not tagged "latest" and helm search hides
-                         them unless --devel is passed (handled internally
-                         when this var is set).
+  OSMO_IMAGE_REGISTRY    OSMO image prefix (default: osmo)
+  OSMO_IMAGE_TAG         Default: <source-version>-prana-<commit-first-8>,
+                         matching scripts/build-images.sh. Set explicitly
+                         when deploying images built from another commit.
+  OSMO_IMAGE_PULL_POLICY Default: Never for osmo (preload every target node),
+                         Always for remote prefixes. Also allows IfNotPresent.
+  OSMO_CHART_DIR         Default: deployments/charts from this checkout.
+                         Set to an empty string to use the remote Helm repo.
+  OSMO_CHART_VERSION     Pin remote chart version (OSMO_CHART_DIR="" only).
   OSMO_CLI_REF           Pin osmo CLI to a release tag from
                          github.com/NVIDIA/OSMO/releases. Required when
                          deploying a channel that doesn't match the latest
