@@ -31,6 +31,9 @@ single-plane installers use the unified chart on Azure and GCP.
 # AWS: provision EKS + RDS + ElastiCache + S3, then install OSMO
 ./deploy-osmo-minimal.sh --provider aws
 
+# GCP: provision GKE + Cloud SQL + Memorystore + GCS (HMAC), then install OSMO
+./deploy-osmo-minimal.sh --provider gcp --project-id <existing-project>
+
 # Single-node MicroK8s on a fresh Ubuntu box (auto-installs MicroK8s)
 ./deploy-osmo-minimal.sh --provider microk8s --gpu
 
@@ -125,17 +128,19 @@ Three orthogonal axes:
 
 Cells show which auth methods are valid for each `(provider, storage-backend)` pair:
 
-| ↓ Provider \ Storage → | `minio`      | `azure-blob`         | `s3`       | `byo`                |
-|------------------------|--------------|----------------------|------------|----------------------|
-| `azure` (AKS)          | static       | static, WI           | static     | static, WI           |
-| `aws` (EKS)            | static       | static               | static     | static, WI (IRSA)    |
-| `microk8s` (single-node) | static     | —                    | —          | static               |
-| `byo` (any K8s)        | static       | static, WI*          | static     | static, WI*          |
+| ↓ Provider \ Storage → | `minio`      | `azure-blob`         | `s3`       | `gcs`      | `byo`                |
+|------------------------|--------------|----------------------|------------|------------|----------------------|
+| `azure` (AKS)          | static       | static, WI           | static     | static     | static, WI           |
+| `aws` (EKS)            | static       | static               | static     | static     | static, WI (IRSA)    |
+| `gcp` (GKE)            | static       | static               | static     | static     | static               |
+| `microk8s` (single-node) | static     | —                    | —          | —          | static               |
+| `byo` (any K8s)        | static       | static, WI*          | static     | static     | static, WI*          |
 
 \* `workload-identity` on `byo` requires the cluster's K8s API server to have the appropriate OIDC issuer + the cloud-side trust set up by the caller.
 
 Notes:
 - `s3` does **not** support `workload-identity` directly — use `--backend byo --auth-method workload-identity` with IRSA instead. `s3.sh` errors out with this guidance.
+- `gcs` is static HMAC only: the `gs://` storage backend has no default-credential path yet, so GKE Workload Identity does not apply.
 - `microk8s` deliberately has no cloud-identity path — it's a single-node dev/eval flow.
 - Cross-cloud combinations (e.g. AKS pointing at S3) are valid for `static` auth.
 
@@ -148,6 +153,7 @@ Notes:
 | `byo`      | `minio` / static       | ✅     |
 | `aws`      | `s3` / static          | ✅     |
 | `azure`    | `azure-blob` / WI      | ⏳     |
+| `gcp`      | `gcs` / static         | ⏳     |
 
 ✅ = end-to-end green. ⏳ = code paths complete, full E2E pending.
 
@@ -163,11 +169,12 @@ scripts/
 ├── install-gpu-operator.sh   # NVIDIA GPU Operator (multi-signal auto-skip)
 ├── install-minio.sh          # In-cluster MinIO (bitnami; auto-skips if addon/release present)
 ├── configure-storage.sh      # 6.3 storage wiring: K8s Secrets + values fragment
-├── storage/                  # Per-backend storage logic (minio, azure-blob, s3, byo)
+├── storage/                  # Per-backend storage logic (minio, azure-blob, s3, gcs, byo)
 ├── port-forward.sh           # One-shot or watchdog kubectl port-forward
 ├── verify.sh                 # End-to-end smoke tests (hello + object storage + GPU)
 ├── azure/terraform.sh        # Azure Terraform driver
 ├── aws/terraform.sh          # AWS Terraform driver
+├── gcp/terraform.sh          # GCP Terraform driver
 ├── microk8s/install.sh       # Single-node MicroK8s bootstrap
 └── README.md                 # This file
 ```
@@ -177,7 +184,7 @@ Sibling directories under `deployments/`:
 ```
 ../workflows/        # hello, object-storage, and GPU smoke-test workflows
 ../values/           # static, hand-editable Helm values (see ../values/README.md)
-../terraform/        # Terraform modules for azure/ + aws/
+../terraform/        # Terraform modules for azure/ + aws/ + gcp/
 ./values/            # auto-generated runtime values; .storage-values.yaml from configure-storage.sh
 ```
 
@@ -211,17 +218,17 @@ Main entry point — see `--help` for the full flag list. Orchestrates all phase
 
 | Flag | Purpose |
 |------|---------|
-| `--provider {azure,aws,microk8s,byo}` | Required. Selects bootstrap path. |
-| `--storage-backend {auto,minio,azure-blob,s3,byo,none}` | Default `auto`: chooses based on provider (azure→azure-blob, aws→s3, microk8s→minio, byo→error). |
+| `--provider {azure,aws,gcp,microk8s,byo}` | Required. Selects bootstrap path. |
+| `--storage-backend {auto,minio,azure-blob,s3,gcs,byo,none}` | Default `auto`: chooses based on provider (azure→azure-blob, aws→s3, gcp→gcs, microk8s→minio, byo→error). |
 | `--auth-method {static,workload-identity}` | Default `static`. See [Deployment Combinations](#deployment-combinations) for what's supported per backend. |
 | `--workload-identity-client-id ID` | Azure UAMI client ID (azure-blob + WI). |
 | `--workload-identity-role-arn ARN` | AWS IAM role ARN (byo + WI / IRSA). |
-| `--gpu-node-pool` | azure/aws: provision a GPU node pool via TF (requires the optional TF resources enabled). |
+| `--gpu-node-pool` | azure/aws/gcp: provision a GPU node pool via TF (requires the optional TF resources enabled). On GKE the pool scales from zero and GKE installs the driver; no GPU Operator is installed. |
 | `--no-gpu` | Skip GPU Operator install + GPU smoke test. |
 | `--gpu` | microk8s only: enable the `nvidia` addon. Requires NVIDIA driver ≥ 525 on the host. |
-| `--skip-terraform` | azure/aws: skip the bootstrap phase (cluster already exists). |
+| `--skip-terraform` | azure/aws/gcp: skip the bootstrap phase (cluster already exists). |
 | `--skip-osmo` | Provision infrastructure only. |
-| `--destroy` | TF destroy (azure/aws) + cluster cleanup. |
+| `--destroy` | TF destroy (azure/aws/gcp) + cluster cleanup. |
 | `--ngc-api-key KEY` | Auth for `nvcr.io` images and `helm.ngc.nvidia.com` charts. Also `NGC_API_KEY` env var. |
 | `--helm-values FILE` | Repeatable values file layered into both the service and backend-operator Helm releases. |
 | `--service-helm-values FILE` | Repeatable values file layered only into the service Helm release. |
@@ -291,9 +298,9 @@ Each is idempotent and safe to invoke on a cluster where the target component al
 
 Single-node MicroK8s bootstrap, used only by `--provider microk8s`. Installs snapd → microk8s 1.31/stable → kubectl/helm/helmfile → core addons (`dns`, `hostpath-storage`, `helm3`, `rbac`, `minio`) → optional `nvidia` addon → containerd Docker Hub creds patch (when `~/.docker/config.json` exists) → kubeconfig export. Run as root: `sudo ./microk8s/install.sh [--gpu]`. Idempotent.
 
-### `azure/terraform.sh`, `aws/terraform.sh`
+### `azure/terraform.sh`, `aws/terraform.sh`, `gcp/terraform.sh`
 
-Provider-specific Terraform drivers. Provision cluster, DB, Redis, network, and (optionally) GPU node pool + cloud object storage. State lives under `../terraform/<provider>/`.
+Provider-specific Terraform drivers. Provision cluster, DB, Redis, network, and (optionally) GPU node pool + cloud object storage. State lives under `../terraform/<provider>/`. The GCP driver reads the example's single sensitive `deployment` output, generates the database password in Terraform, provisions Memorystore without in-transit TLS (the service chart trusts only public CAs) and reaches the private GKE control plane through its DNS endpoint.
 
 ## Examples
 
@@ -347,6 +354,20 @@ Prompts for subscription ID, resource group, PostgreSQL password, optionally clu
 ```
 
 > Keep cluster names ≤ 12 characters to avoid AWS IAM role name length limits.
+
+### GCP
+
+```bash
+gcloud auth login
+gcloud auth application-default login
+./deploy-osmo-minimal.sh --provider gcp \
+  --project-id "my-project" \
+  --gcp-region "asia-southeast1" \
+  --cluster-name "osmo-gcp" \
+  --non-interactive
+```
+
+> Requires `gke-gcloud-auth-plugin`. Terraform generates the PostgreSQL password and the GCS HMAC key; `--gpu-node-pool` adds a Spot GPU pool that scales from zero. `--destroy` empties the bucket.
 
 ### NGC private registry credentials
 

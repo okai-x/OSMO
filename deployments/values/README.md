@@ -18,9 +18,10 @@ To customize defaults beyond what `--set` covers, edit these files directly.
 | `service.yaml` | Always | Base values for the `service` chart (now bundles router + UI). Mirrors the [docs minimal-deploy values](../../docs/deployment_guide/appendix/deploy_minimal.rst). |
 | `backend-operator.yaml` | Always | Base values for the `backend-operator` chart. |
 | `gpu-pool.yaml` | When GPU nodes are detected (or `--gpu-node-pool`) | Adds `gpu_toleration` pod template + GPU platform on the default pool. |
+| `gpu-pool-gke.yaml` | `--provider gcp` with GKE accelerator nodes (or `--gpu-node-pool`) | Same platform wiring keyed on GKE's `cloud.google.com/gke-accelerator` label; GKE supplies the driver, so no GPU Operator labels exist. |
 | `pod-monitor-on.yaml` | When prometheus-operator CRDs are detected (or `OSMO_POD_MONITOR_ENABLED=true`) | Re-enables PodMonitor scraping. Off by default to avoid CRD-not-installed errors. |
 
-In addition, the storage backend script ([`scripts/configure-storage.sh`](../scripts/configure-storage.sh)) writes a runtime fragment to `scripts/values/.storage-values.yaml` — that file is auto-generated and should not be hand-edited; it carries the workflow credential references for the backend you selected (`minio` / `azure-blob` / `byo`).
+In addition, the storage backend script ([`scripts/configure-storage.sh`](../scripts/configure-storage.sh)) writes a runtime fragment to `scripts/values/.storage-values.yaml` — that file is auto-generated and should not be hand-edited; it carries the workflow credential references for the backend you selected (`minio` / `azure-blob` / `s3` / `gcs` / `byo`).
 
 ## Layering order
 
@@ -29,7 +30,7 @@ In addition, the storage backend script ([`scripts/configure-storage.sh`](../scr
 ```
 -f values/service.yaml
 [-f values/pod-monitor-on.yaml]               # if CRDs detected
-[-f values/gpu-pool.yaml]                     # if GPU nodes detected
+[-f values/gpu-pool.yaml]                     # if GPU nodes detected (gpu-pool-gke.yaml on GKE)
 -f scripts/values/.storage-values.yaml         # runtime-rendered storage fragment
 --set global.osmoImageLocation=...             # cluster-specific overrides
 --set global.osmoImageTag=...
