@@ -22,10 +22,9 @@ depend on the separate `infra` repository. It does not adopt existing clusters.
 - GKE node service account with the default node role and Artifact Registry read
   access in the target project. Artifact Registry repositories/images are not created.
 
-This is a development baseline, not a production HA configuration. PostgreSQL
-connections use TLS `require`: traffic is encrypted, but server identity is not
-verified against its private IP. Redis uses its CA certificate plus a public CA
-bundle, so HTTPS access to GCS continues to validate public certificates.
+This is a development baseline, not a production HA configuration. Cloud SQL
+accepts only encrypted connections (`ssl_mode = ENCRYPTED_ONLY`); clients
+encrypt traffic without verifying the server identity against its private IP.
 
 GCS uses HMAC because the current `GSBackend.data_auth` rejects default credentials.
 Enabling GKE Workload Identity does not remove that application limitation.
@@ -33,88 +32,60 @@ Enabling GKE Workload Identity does not remove that application limitation.
 ## Prerequisites
 
 Install Terraform >= 1.9 or compatible OpenTofu, Google Cloud CLI,
-`gke-gcloud-auth-plugin`, `kubectl`, Helm, OpenSSL, jq, curl and the OSMO CLI.
-The script checks dependencies and does not install CLI tools. Configure both
+`gke-gcloud-auth-plugin`, `kubectl`, Helm, jq and the OSMO CLI. Configure both
 gcloud login and Application Default Credentials for the intended identity.
 That identity needs permission to enable APIs and manage the resources above,
 including project IAM bindings, storage HMAC keys, and cluster administration.
 Organization policies must allow HMAC keys and the selected location.
 
-Choose a new cluster name and a shared image tag available for all OSMO service
-and runtime images. Public NGC images are the default. A private Artifact Registry
-repository in this project works through the node service account; external private
-registries requiring Docker pull secrets are outside this example.
+## Usage
 
-From the OSMO repository root:
+`deployments/scripts/deploy-osmo-minimal.sh --provider gcp` drives this example
+through `deployments/scripts/gcp/terraform.sh`. It writes `terraform.tfvars` in
+this directory, runs `terraform init` and `apply`, reads the sensitive
+`deployment` output, configures kubectl through the cluster's DNS endpoint and
+installs OSMO with the `gcs` storage backend:
 
 ```bash
-export TF_VAR_project_id='<existing-project-id>'
-export TF_VAR_cluster_name='osmo-dev'
-export TF_VAR_region='asia-southeast1'
-export TF_VAR_zone='asia-southeast1-b'
-export OSMO_IMAGE_TAG='<tested-image-tag>'
-# Optional, e.g. asia-southeast1-docker.pkg.dev/<project>/<repository>
-# export OSMO_IMAGE_REGISTRY='nvcr.io/nvidia/osmo'
-# Optional when Terraform is not installed:
-# export TERRAFORM_BIN='/absolute/path/to/tofu'
-
-bash deployments/scripts/deploy-osmo-gcp.sh plan
-bash deployments/scripts/deploy-osmo-gcp.sh apply
-bash deployments/scripts/deploy-osmo-gcp.sh deploy
+gcloud auth login
+gcloud auth application-default login
+deployments/scripts/deploy-osmo-minimal.sh --provider gcp \
+  --project-id <existing-project-id> --gcp-region asia-southeast1 --cluster-name osmo-dev
 ```
 
-`plan` previews infrastructure. `apply` asks Terraform's normal approval question.
-`deploy` reads that target's Terraform outputs, creates Kubernetes Secrets,
-installs KAI and the unified OSMO chart, then runs the existing CPU and GCS
-round-trip smoke workflows. GPU verification is skipped. `verify` reruns those
-workflows without installing or upgrading resources. Smoke tests create workflow
-records, logs and objects. Each command propagates failures.
+The driver sets `redis_transit_encryption_mode = "DISABLED"` because the minimal
+service chart trusts only public CAs, and `deletion_protection = false` plus
+`bucket_force_destroy = true` so that `--destroy` removes the environment
+completely. `--gpu-node-pool` enables the Spot GPU pool; `TF_GPU_MACHINE_TYPE`
+and `TF_GPU_ACCELERATOR_TYPE` override its shape. Edit `terraform.tfvars` for any
+other variable and re-run.
 
-The gateway stays ClusterIP-only and authenticated. The deploy/verify process
-uses an isolated temporary kubeconfig and a localhost port-forward on port 9000;
-it removes both on exit. It does not change the user's default kubectl context.
-The OSMO CLI's smoke-test login does update its local login configuration.
-To open the UI later, explicitly obtain credentials for this cluster, port-forward
-`service/osmo-gateway` in namespace `osmo`, and use the token in the
-`osmo-default-admin` Secret (`password` key). No public ingress or DNS is created.
+Direct Terraform use works too: create `terraform.tfvars` with at least
+`project_id` and `cluster_name`, then run `terraform init` and `terraform apply`
+here. The `deployment` output carries every connection detail and credential;
+never print or commit it.
 
-## State, upgrades and teardown
+## State and teardown
 
-The script retains state and provider locks under:
+State lives in this directory as `terraform.tfstate`, excluded by the Terraform
+`.gitignore`. It holds the PostgreSQL password, Redis AUTH string and HMAC secret
+in plain text even though the output is marked sensitive; back it up securely
+and move to a protected remote backend before sharing control. Deleting the
+state does not delete cloud resources.
 
-```text
-deployments/terraform/gcp/example/.osmo/<project>/<zone>/<cluster>/
-```
-
-Keep the same project, region, zone and cluster environment variables for every
-operation. Re-running `deploy` preserves admin/backend tokens and updates the
-OSMO release. Secrets go through protected temporary files; Helm values contain
-only endpoints, Secret references and a rollout hash. Do not enable Terraform
-debug logging for real credentials.
-
-Local Terraform state contains PostgreSQL, Redis and HMAC credentials in plain
-text, even though the output is marked sensitive. The existing Terraform
-`.gitignore` excludes it; back it up securely. For team use, configure a protected
-remote backend and migrate the state before sharing control. Do not delete the
-state directory to reset an environment: the cloud resources would remain.
-
-Stopping the script or deleting OSMO Pods does not stop infrastructure billing.
-Nodes, managed databases, disks, NAT and stored data remain provisioned.
-There is no automatic destroy command. For intentional teardown, review the
-target's state, apply `TF_VAR_deletion_protection=false`, then run Terraform
-`destroy` in that same state directory. GKE/SQL protection defaults to enabled;
-GCS `force_destroy=false` also prevents deleting a non-empty bucket. Back up or
-explicitly remove retained data before completing teardown.
+Nodes, managed databases, disks, NAT and stored data bill until destroyed.
+`deploy-osmo-minimal.sh --provider gcp --destroy` runs `terraform destroy` with
+the driver's tfvars. A manual `terraform destroy` with the variable defaults
+stops at the protected cluster and database and at a non-empty bucket until
+`deletion_protection` and `bucket_force_destroy` are changed.
 
 ## Local verification
 
 ```bash
 terraform -chdir=deployments/terraform/gcp/example init -backend=false
 terraform -chdir=deployments/terraform/gcp/example validate
-bazel test //deployments/scripts/tests:test_deploy_osmo_gcp
-shellcheck deployments/scripts/deploy-osmo-gcp.sh deployments/scripts/tests/test_deploy_osmo_gcp.sh
+bazel test //deployments/scripts/tests:test_gcp_terraform_driver
 ```
 
-The shell test mocks cloud/Kubernetes commands. Passing it or Helm rendering is
-not evidence of a running deployment. Runtime acceptance is a successful `deploy`
-or `verify` against actual infrastructure, including both workflow completions.
+Validation checks syntax and schema only. Runtime acceptance is a successful
+`deploy-osmo-minimal.sh --provider gcp` run including its smoke workflows.
