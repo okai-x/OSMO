@@ -164,11 +164,31 @@ osmo_py_library(
     ],
 )
 
+# Build tag appended to the version as its hash suffix. Comes from
+# STABLE_OSMO_VERSION_TAG, which the default workspace status command
+# bzl/prana_status.sh provides; empty when a build replaces that command.
+# The service parses client versions with ^\d+\.\d+\.\d+(\.[a-zA-Z0-9]+)?$,
+# hence the alphanumeric check.
+genrule(
+    name = "version_tag",
+    outs = ["version_tag.txt"],
+    cmd = """
+tag=$$(sed -n 's/^STABLE_OSMO_VERSION_TAG //p' bazel-out/stable-status.txt)
+case "$$tag" in
+    *[!a-zA-Z0-9]*) echo "STABLE_OSMO_VERSION_TAG must be alphanumeric: $$tag" >&2; exit 1 ;;
+esac
+printf '%s' "$$tag" > $@
+""",
+    stamp = 1,
+    visibility = ["//visibility:public"],
+)
+
 osmo_py_library(
     name = "version",
     srcs = ["version.py"],
     data = [
         "version.yaml",
+        ":version_tag",
     ],
     deps = [
         requirement("pydantic"),
