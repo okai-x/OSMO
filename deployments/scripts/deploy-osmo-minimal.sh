@@ -31,10 +31,10 @@
 # - jq
 #
 # Usage:
-#   ./deploy-osmo-minimal.sh --provider azure|aws [options]
+#   ./deploy-osmo-minimal.sh --provider azure|aws|gcp [options]
 #
 # Options:
-#   --provider PROVIDER  Cloud provider: azure or aws (required)
+#   --provider PROVIDER  Cloud provider: azure, aws or gcp (required)
 #   --skip-terraform     Skip Terraform provisioning (use existing infrastructure)
 #   --skip-osmo          Skip OSMO deployment (only provision infrastructure)
 #   --destroy            Destroy all resources
@@ -55,6 +55,12 @@
 #   --aws-profile        AWS profile (default: default)
 #   --cluster-name       EKS cluster name (default: osmo-cluster)
 #   --postgres-password  PostgreSQL admin password
+#
+# GCP-specific options:
+#   --project-id         Existing GCP project with billing enabled
+#   --gcp-region         GCP region (default: asia-southeast1)
+#   --zone               GCP zone (default: <region>-b)
+#   --cluster-name       GKE cluster name (default: osmo-cluster)
 #
 ###############################################################################
 
@@ -117,15 +123,15 @@ show_help() {
     cat << 'EOF'
 OSMO Minimal Deployment Script
 
-Usage: ./deploy-osmo-minimal.sh --provider azure|aws [options]
+Usage: ./deploy-osmo-minimal.sh --provider azure|aws|gcp [options]
 
 Required:
-  --provider PROVIDER    Cloud / cluster provider: azure | aws | microk8s | byo
+  --provider PROVIDER    Cloud / cluster provider: azure | aws | gcp | microk8s | byo
 
 General Options:
-  --skip-terraform       Skip Terraform provisioning (azure/aws only; implied for microk8s/byo)
+  --skip-terraform       Skip Terraform provisioning (azure/aws/gcp; implied for microk8s/byo)
   --skip-osmo            Skip OSMO deployment (only provision infrastructure)
-  --destroy              Destroy all resources (azure/aws: TF destroy; microk8s/byo: OSMO ns cleanup)
+  --destroy              Destroy all resources (azure/aws/gcp: TF destroy; microk8s/byo: OSMO ns cleanup)
   --dry-run              Show what would be done without making changes
   --non-interactive      Fail if required parameters are missing (for CI/CD)
   --ngc-api-key KEY      NGC API key for pulling images and Helm charts from nvcr.io.
@@ -136,7 +142,7 @@ General Options:
                          pods pull anonymously, works for public images only.
                          Set explicitly to reference a pre-created secret
                          (e.g. AKS-managed "imagepullsecret").
-  --storage-backend X    Storage backend: auto|minio|s3|azure-blob|byo|none (default: auto)
+  --storage-backend X    Storage backend: auto|minio|s3|azure-blob|gcs|byo|none (default: auto)
   --auth-method X        Storage auth: static|workload-identity (default: static)
                          workload-identity REQUIRES caller-provisioned cloud
                          identity (UAMI for Azure, IAM role for AWS) + RBAC.
@@ -145,7 +151,7 @@ General Options:
                          Azure UAMI client ID (required for azure-blob + WI)
   --workload-identity-role-arn ARN
                          AWS IAM role ARN (required for byo + WI / IRSA)
-  --gpu-node-pool        Provision a GPU node pool (azure/aws only; requires TF variables)
+  --gpu-node-pool        Provision a GPU node pool (azure/aws/gcp; requires TF variables)
   --with-nfs-storage     (azure) Provision a Premium FileStorage Azure
                          Storage Account + the 4 AKS role assignments
                          file.csi.azure.com needs to dynamically provision
@@ -186,6 +192,14 @@ AWS-specific Options:
   --cluster-name NAME    EKS cluster name (default: osmo-cluster)
   --postgres-password PW PostgreSQL admin password
   --environment ENV      Environment name (default: dev)
+
+GCP-specific Options:
+  --project-id ID        Existing GCP project with billing enabled (required)
+  --gcp-region REGION    GCP region (default: asia-southeast1)
+  --zone ZONE            GCP zone for the zonal cluster (default: <region>-b)
+  --cluster-name NAME    GKE cluster name, 2-20 lowercase chars (default: osmo-cluster)
+                         Terraform generates the database password; Memorystore
+                         runs without in-transit TLS inside the private VPC.
 
 Discovery (provider-less, exit after running):
   --list-chart-versions  List all available chart versions in OSMO_HELM_REPO_URL
@@ -247,6 +261,11 @@ Examples:
   ./deploy-osmo-minimal.sh --provider aws \
     --aws-region us-west-2 \
     --postgres-password 'SecurePass123!'
+
+  # GCP deployment (GKE + Cloud SQL + Memorystore + GCS via HMAC)
+  ./deploy-osmo-minimal.sh --provider gcp \
+    --project-id my-project \
+    --gcp-region asia-southeast1
 
   # Only provision infrastructure
   ./deploy-osmo-minimal.sh --provider azure --skip-osmo
@@ -333,6 +352,12 @@ while [[ $# -gt 0 ]]; do
             TF_AWS_REGION="$2"; shift 2 ;;
         --aws-profile)
             TF_AWS_PROFILE="$2"; shift 2 ;;
+        --project-id)
+            TF_PROJECT_ID="$2"; shift 2 ;;
+        --gcp-region)
+            TF_GCP_REGION="$2"; shift 2 ;;
+        --zone)
+            TF_GCP_ZONE="$2"; shift 2 ;;
         --environment)
             TF_ENVIRONMENT="$2"; shift 2 ;;
         --k8s-version)
@@ -426,17 +451,17 @@ fi
 ###############################################################################
 
 if [[ -z "$PROVIDER" ]]; then
-    log_error "Provider is required. Use --provider azure|aws|microk8s|byo"
+    log_error "Provider is required. Use --provider azure|aws|gcp|microk8s|byo"
     echo ""
     show_help
     exit 1
 fi
 
 case "$PROVIDER" in
-    azure|aws|microk8s|byo)
+    azure|aws|gcp|microk8s|byo)
         ;;
     *)
-        log_error "Unknown provider: $PROVIDER. Supported: azure, aws, microk8s, byo"
+        log_error "Unknown provider: $PROVIDER. Supported: azure, aws, gcp, microk8s, byo"
         exit 1
         ;;
 esac
@@ -461,6 +486,10 @@ setup_provider_env() {
         aws)
             source "$SCRIPT_DIR/aws/terraform.sh"
             TERRAFORM_DIR="${AWS_TERRAFORM_DIR:-$SCRIPT_DIR/../terraform/aws/example}"
+            ;;
+        gcp)
+            source "$SCRIPT_DIR/gcp/terraform.sh"
+            TERRAFORM_DIR="${GCP_TERRAFORM_DIR:-$SCRIPT_DIR/../terraform/gcp/example}"
             ;;
         microk8s|byo)
             # No TF for these providers
@@ -525,6 +554,11 @@ setup_provider_env() {
           && -z "${STORAGE_BUCKET:-}" ]]; then
         export TF_S3_BUCKET_ENABLED=true
     fi
+    # The GCP example always provisions the bucket and HMAC key, and the gcs
+    # backend reads them from the same Terraform outputs, so auto means gcs.
+    if [[ "$PROVIDER" == "gcp" && "$STORAGE_BACKEND" == "auto" ]]; then
+        STORAGE_BACKEND="gcs"
+    fi
 
     # Set output file paths
     OUTPUTS_FILE="$SCRIPT_DIR/.${PROVIDER}_outputs.env"
@@ -550,7 +584,7 @@ preflight_checks() {
 
     # terraform is only required for cloud providers that run TF
     case "$PROVIDER" in
-        azure|aws)
+        azure|aws|gcp)
             check_command "terraform"
             ;;
     esac
@@ -562,6 +596,9 @@ preflight_checks() {
             ;;
         aws)
             aws_preflight_checks
+            ;;
+        gcp)
+            gcp_preflight_checks
             ;;
         microk8s)
             # microk8s/install.sh handles its own preflight (snapd, driver, ports)
@@ -602,6 +639,9 @@ run_terraform_init() {
         aws)
             aws_terraform_init "$TERRAFORM_DIR"
             ;;
+        gcp)
+            gcp_terraform_init "$TERRAFORM_DIR"
+            ;;
     esac
 }
 
@@ -612,6 +652,9 @@ run_terraform_apply() {
             ;;
         aws)
             aws_terraform_apply "$TERRAFORM_DIR" "$DRY_RUN"
+            ;;
+        gcp)
+            gcp_terraform_apply "$TERRAFORM_DIR" "$DRY_RUN"
             ;;
     esac
 }
@@ -624,6 +667,9 @@ run_terraform_destroy() {
         aws)
             aws_terraform_destroy "$TERRAFORM_DIR" "$DRY_RUN"
             ;;
+        gcp)
+            gcp_terraform_destroy "$TERRAFORM_DIR" "$DRY_RUN"
+            ;;
     esac
 }
 
@@ -634,6 +680,9 @@ get_terraform_outputs() {
             ;;
         aws)
             aws_get_terraform_outputs "$TERRAFORM_DIR" "$OUTPUTS_FILE"
+            ;;
+        gcp)
+            gcp_get_terraform_outputs "$TERRAFORM_DIR" "$OUTPUTS_FILE"
             ;;
     esac
 }
@@ -646,6 +695,9 @@ configure_kubectl() {
         aws)
             aws_configure_kubectl
             ;;
+        gcp)
+            gcp_configure_kubectl
+            ;;
     esac
 }
 
@@ -657,6 +709,9 @@ verify_provider_config() {
         aws)
             # AWS-specific verification if needed
             log_info "Verifying AWS configuration..."
+            ;;
+        gcp)
+            # gcp_get_terraform_outputs already validated the deployment contract
             ;;
         microk8s|byo)
             # No cloud-side config to verify
@@ -706,7 +761,10 @@ install_cluster_dependencies() {
     log_info "Installing cluster dependencies..."
 
     NO_GPU="$NO_GPU" bash "$SCRIPT_DIR/install-kai-scheduler.sh"
-    NO_GPU="$NO_GPU" bash "$SCRIPT_DIR/install-gpu-operator.sh"
+    # GKE installs the NVIDIA driver and device plugin on its GPU node pools.
+    local skip_gpu_operator=0
+    [[ "$PROVIDER" == "gcp" ]] && skip_gpu_operator=1
+    NO_GPU="$NO_GPU" SKIP_GPU_OPERATOR="$skip_gpu_operator" bash "$SCRIPT_DIR/install-gpu-operator.sh"
 
     # MinIO is only installed if the user actually selected it as the backend.
     if [[ "$STORAGE_BACKEND" == "minio" ]] || [[ "$STORAGE_BACKEND" == "auto" && "$PROVIDER" == "microk8s" ]]; then
@@ -776,6 +834,12 @@ handle_configuration() {
                 has_all_required=true
             fi
             ;;
+        gcp)
+            # Terraform generates the database password; the project is the only input.
+            if [[ -n "${TF_PROJECT_ID:-}" ]]; then
+                has_all_required=true
+            fi
+            ;;
     esac
 
     if [[ "$has_all_required" == true ]]; then
@@ -787,6 +851,9 @@ handle_configuration() {
                 ;;
             aws)
                 aws_generate_tfvars "$tfvars_file"
+                ;;
+            gcp)
+                gcp_generate_tfvars "$tfvars_file"
                 ;;
         esac
     elif [[ ! -f "$tfvars_file" ]]; then
@@ -806,6 +873,10 @@ handle_configuration() {
             aws)
                 aws_configure_interactively
                 aws_generate_tfvars "$tfvars_file"
+                ;;
+            gcp)
+                gcp_configure_interactively
+                gcp_generate_tfvars "$tfvars_file"
                 ;;
         esac
     else

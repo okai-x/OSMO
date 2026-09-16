@@ -224,7 +224,7 @@ parse_k8s_args() {
 
 setup_provider() {
     if [[ -z "$PROVIDER" ]]; then
-        log_error "Provider not specified. Use --provider azure|aws"
+        log_error "Provider not specified. Use --provider azure|aws|gcp"
         exit 1
     fi
 
@@ -257,6 +257,13 @@ setup_provider() {
             RUN_HELM="aws_run_helm"
             RUN_HELM_WITH_VALUES="aws_run_helm_with_values"
             ;;
+        gcp)
+            source "$SCRIPT_DIR/gcp/terraform.sh"
+            RUN_KUBECTL="gcp_run_kubectl"
+            RUN_KUBECTL_APPLY_STDIN="gcp_run_kubectl_apply_stdin"
+            RUN_HELM="gcp_run_helm"
+            RUN_HELM_WITH_VALUES="gcp_run_helm_with_values"
+            ;;
         byo|microk8s)
             # No cloud-specific kubectl/helm wrappers — use plain commands.
             # The functions defined here mirror the azure/aws wrapper signatures
@@ -281,7 +288,7 @@ setup_provider() {
             RUN_HELM_WITH_VALUES="byo_run_helm_with_values"
             ;;
         *)
-            log_error "Unknown provider: $PROVIDER. Supported: azure, aws, microk8s, byo"
+            log_error "Unknown provider: $PROVIDER. Supported: azure, aws, gcp, microk8s, byo"
             exit 1
             ;;
     esac
@@ -943,6 +950,14 @@ service_set_flags() {
     # production path; for the minimal/test path, use ClusterIP and rely on
     # the port-forward watchdog the deploy script already starts.
     if [[ "${PROVIDER:-}" == "aws" ]]; then
+        sets+=" --set gateway.envoy.service.type=ClusterIP"
+    fi
+    # GCP: Memorystore is provisioned without in-transit TLS because the chart
+    # trusts only public CAs, and the private development cluster keeps the
+    # gateway on ClusterIP behind the port-forward watchdog instead of a
+    # public LoadBalancer.
+    if [[ "${PROVIDER:-}" == "gcp" ]]; then
+        sets+=" --set services.redis.tlsEnabled=false"
         sets+=" --set gateway.envoy.service.type=ClusterIP"
     fi
 
