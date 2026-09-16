@@ -44,6 +44,12 @@ build --host_per_file_copt=external/.*@-w
 # Disable pipstar (cross-platform wheel resolution) to reduce analysis-phase memory
 build --repo_env=RULES_PYTHON_ENABLE_PIPSTAR=0
 
+# Every build embeds the Prana tag as the version's hash suffix, so binaries
+# report e.g. 6.4.0.prana instead of the upstream 6.4.0. Set OSMO_VERSION_TAG
+# for a specific tag. See bzl/prana_status.sh; --config=stamp_py_wheel below
+# replaces the status command and therefore builds without the tag.
+build --workspace_status_command=bzl/prana_status.sh
+
 # Config to stamp the version info on the Python Library wheel when creating distribution
 build:stamp_py_wheel --stamp
 build:stamp_py_wheel --workspace_status_command=src/lib/distribution/stamp.sh

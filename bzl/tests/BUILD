@@ -175,3 +175,10 @@ test_suite(
         ":backend_worker_image_runfiles_test",
     ],
 )
+
+sh_test(
+    name = "prana_status_test",
+    size = "small",
+    srcs = ["prana_status_test.sh"],
+    data = ["//bzl:prana_status.sh"],
+)

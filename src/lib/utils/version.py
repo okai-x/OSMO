@@ -25,6 +25,9 @@ import yaml
 
 from . import osmo_errors
 
+VERSION_FILE = 'version.yaml'
+# Written at build time by //src/lib/utils:version_tag (see bzl/prana_status.sh).
+VERSION_TAG_FILE = 'version_tag.txt'
 VERSION_HEADER = 'x-osmo-client-version'
 SERVICE_VERSION_HEADER = 'x-osmo-service-version'
 WARNING_HEADER = 'x-osmo-warning'
@@ -83,17 +86,50 @@ class Version(pydantic.BaseModel):
         return Version(**kwargs)
 
 
-def load_version() -> Version:
-    """ Loads the version from the version file. """
-    release_file_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'version.yaml')
+def _module_directories() -> list[str]:
+    """ Directories that may hold the version files: the runfiles symlink
+    directory first, then the resolved source directory. """
+    directories = [os.path.dirname(os.path.abspath(__file__))]
+    real_directory = os.path.dirname(os.path.realpath(__file__))
+    if real_directory not in directories:
+        directories.append(real_directory)
+    return directories
+
+
+def _read_version_tag(directory: str) -> str:
+    tag_path = os.path.join(directory, VERSION_TAG_FILE)
+    if not os.path.exists(tag_path):
+        return ''
+    with open(tag_path, 'r', encoding='UTF-8') as file:
+        return file.read().strip()
+
+
+def load_version(directory: str | None = None) -> Version:
+    """ Loads the version from the version file.
+
+    A build tag file beside it supplies the hash suffix when the version file
+    itself carries none, so tagged builds report major.minor.revision.tag.
+    None means the directory of this module.
+    """
+    directories = [directory] if directory is not None else _module_directories()
+    for candidate in directories:
+        release_file_path = os.path.join(candidate, VERSION_FILE)
+        if os.path.exists(release_file_path):
+            break
     with open(release_file_path, 'r', encoding='UTF-8') as file:
         version_spec = yaml.safe_load(file)
+    if not version_spec.get('hash'):
+        for candidate in directories:
+            tag = _read_version_tag(candidate)
+            if tag:
+                version_spec['hash'] = tag
+                break
     return Version(**version_spec)
 
 
 def write_version(version: Version) -> None:
     """ Replaces the version into version file. """
-    release_file_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'version.yaml')
+    release_file_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), VERSION_FILE)
     data = ''
     for key, value in version.model_dump().items():
         data += F'{key.lower()}: {value}\n'
