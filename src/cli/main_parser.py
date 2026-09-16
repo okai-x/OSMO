@@ -23,6 +23,7 @@ import argparse
 from src.cli import (
     app,
     access_token,
+    backend,
     config,
     credential,
     data,
@@ -50,6 +51,7 @@ PARSERS = (
     resources.setup_parser,
     profile.setup_parser,
     pool.setup_parser,
+    backend.setup_parser,
     user.setup_parser,
     config.setup_parser
 )
