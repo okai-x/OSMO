@@ -1179,8 +1179,15 @@ render_gpu_pool_values() {
 
     local force="${OSMO_GPU_POOL_ENABLED:-auto}"
     local detected="false"
-    # GPU Operator NFD labels GPU nodes with `nvidia.com/gpu.present=true`.
-    if [ "$($RUN_KUBECTL "get nodes -l nvidia.com/gpu.present=true --no-headers" 2>/dev/null | wc -l)" -gt 0 ]; then
+    # GPU Operator NFD labels GPU nodes with `nvidia.com/gpu.present=true`;
+    # GKE labels its accelerator nodes with `cloud.google.com/gke-accelerator`.
+    local gpu_node_label="nvidia.com/gpu.present=true"
+    local gpu_pool_values="gpu-pool.yaml"
+    if [[ "${PROVIDER:-}" == "gcp" ]]; then
+        gpu_node_label="cloud.google.com/gke-accelerator"
+        gpu_pool_values="gpu-pool-gke.yaml"
+    fi
+    if [ "$($RUN_KUBECTL "get nodes -l $gpu_node_label --no-headers" 2>/dev/null | wc -l)" -gt 0 ]; then
         detected="true"
     fi
 
@@ -1189,12 +1196,12 @@ render_gpu_pool_values() {
         return 0
     fi
 
-    if [[ ! -f "$STATIC_VALUES_DIR/gpu-pool.yaml" ]]; then
-        log_warning "GPU detected but $STATIC_VALUES_DIR/gpu-pool.yaml is missing — skipping"
+    if [[ ! -f "$STATIC_VALUES_DIR/$gpu_pool_values" ]]; then
+        log_warning "GPU detected but $STATIC_VALUES_DIR/$gpu_pool_values is missing — skipping"
         return 0
     fi
 
-    GPU_POOL_VALUES_FILE="$STATIC_VALUES_DIR/gpu-pool.yaml"
+    GPU_POOL_VALUES_FILE="$STATIC_VALUES_DIR/$gpu_pool_values"
     log_success "GPU nodes detected — layering $GPU_POOL_VALUES_FILE"
 }
 

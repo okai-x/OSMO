@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# GKE variant of gpu-pool.yaml. Layered by deploy-k8s.sh for --provider gcp
+# when GPU nodes exist or --gpu-node-pool was requested.
+#
+# GKE installs the NVIDIA driver and device plugin itself, so there is no GPU
+# Operator and no NFD label. GPU nodes carry the cloud.google.com/gke-accelerator
+# label and the nvidia.com/gpu=present:NoSchedule taint GKE adds to accelerator
+# pools; the affinity keys on the label's presence so any accelerator type
+# matches. default_platform=gpu routes workflow pods to those nodes.
+
+services:
+  configs:
+    enabled: true
+    podTemplates:
+      gpu_toleration:
+        spec:
+          tolerations:
+            - key: nvidia.com/gpu
+              operator: Exists
+              effect: NoSchedule
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: cloud.google.com/gke-accelerator
+                        operator: Exists
+    pools:
+      default:
+        default_platform: gpu
+        platforms:
+          system: {}
+          gpu:
+            override_pod_template:
+              - gpu_toleration

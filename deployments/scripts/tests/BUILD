@@ -43,6 +43,18 @@ sh_test(
 )
 
 sh_test(
+    name = "test_gpu_pool_values_selection",
+    size = "small",
+    srcs = ["test_gpu_pool_values_selection.sh"],
+    data = [
+        "//deployments:scripts/common.sh",
+        "//deployments:scripts/deploy-k8s.sh",
+        "//deployments:values/gpu-pool-gke.yaml",
+        "//deployments:values/gpu-pool.yaml",
+    ],
+)
+
+sh_test(
     name = "test_azure_terraform_driver",
     size = "small",
     srcs = ["test_azure_terraform_driver.sh"],
