@@ -164,7 +164,7 @@ Entry point: `cli.py` → `main_parser.py` (argparse). Subcommand modules:
 | `profile.py`                                                                                                   | User profiles                    |
 | `login.py`                                                                                                     | Authentication                   |
 | `pool.py`, `resources.py`, `user.py`, `credential.py`, `access_token.py`, `task.py`, `version.py` | Supporting commands              |
-| `backend.py`                                                                                                   | Backend cluster management       |
+| `backend.py`                                                                                                   | List compute backends and heartbeat-based online status (`backend list`) |
 
 Features: Tab completion (shtab), response formatting (`formatters.py`), spec editor (`editor.py`), PyInstaller packaging (`cli_builder.py`, `packaging/`).
 

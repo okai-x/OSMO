@@ -31,6 +31,17 @@ py_test(
 )
 
 py_test(
+    name = "test_backend",
+    srcs = [
+        "test_backend.py"
+    ],
+    deps = [
+        "//src/cli:cli",
+        "//src/cli:cli_lib",
+    ]
+)
+
+py_test(
     name = "test_login",
     srcs = [
         "test_login.py"
