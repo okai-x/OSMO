@@ -30,7 +30,7 @@
 #   configure-storage.sh [options]
 #
 # Options:
-#   --backend {auto|minio|azure-blob|byo|none}        Backend (default: auto)
+#   --backend {auto|minio|s3|azure-blob|gcs|byo|none}  Backend (default: auto)
 #   --auth-method {static|workload-identity}          Auth mode (default: static)
 #   --namespace NS                                    OSMO namespace (default: osmo-minimal)
 #   --output-values PATH                              Where to write the values fragment
@@ -42,9 +42,11 @@
 #
 # Backend selection:
 #   auto       — Probe live signals: BYO env vars → microk8s minio addon →
-#                helm-installed minio service → osmo Azure TF output → fail
+#                helm-installed minio service → osmo AWS/Azure/GCP TF outputs → fail
 #   minio      — Read MinIO root creds; create osmo-workflow-* Secrets
 #   azure-blob — Read STORAGE_ACCOUNT/STORAGE_KEY (env or osmo TF) → connection string
+#   gcs        — Read GCS_BUCKET/GCS_ACCESS_KEY_ID/GCS_ACCESS_KEY (env or osmo GCP TF);
+#                static HMAC only, the gs:// SDK backend has no default-credential path
 #   byo        — Read all values from env vars (S3-compatible)
 #   none       — Skip storage configuration entirely (caller will configure later)
 #
@@ -165,7 +167,7 @@ fi
 
 # Auto-detect backend by probing live signals. BYO wins if any BYO env var is
 # set (explicit opt-in). Otherwise probe MicroK8s addon → existing MinIO svc →
-# AWS S3 TF outputs → Azure Blob TF outputs. `auto` with no signal is a hard
+# AWS S3 TF outputs → Azure Blob TF outputs → GCP TF outputs. `auto` with no signal is a hard
 # error — storage is required for any non-trivial OSMO workload.
 if [[ "$BACKEND" == "auto" ]]; then
     if [[ -n "${STORAGE_ACCESS_KEY_ID:-}" || -n "${STORAGE_ENDPOINT:-}" ]]; then
@@ -178,15 +180,21 @@ if [[ "$BACKEND" == "auto" ]]; then
         BACKEND="s3"
     elif [[ -n "${STORAGE_ACCOUNT:-}" ]]; then
         BACKEND="azure-blob"
+    elif [[ -n "${GCS_BUCKET:-}" ]]; then
+        BACKEND="gcs"
     else
         AWS_TF_DIR="$SCRIPT_DIR/../terraform/aws/example"
         AZURE_TF_DIR="$SCRIPT_DIR/../terraform/azure/example"
+        GCP_TF_DIR="$SCRIPT_DIR/../terraform/gcp/example"
         if [[ -d "$AWS_TF_DIR" ]] && terraform -chdir="$AWS_TF_DIR" output s3_bucket &>/dev/null \
             && [[ -n "$(terraform -chdir="$AWS_TF_DIR" output -raw s3_bucket 2>/dev/null)" ]]; then
             BACKEND="s3"
         elif [[ -d "$AZURE_TF_DIR" ]] && terraform -chdir="$AZURE_TF_DIR" output storage_account &>/dev/null \
             && [[ -n "$(terraform -chdir="$AZURE_TF_DIR" output -raw storage_account 2>/dev/null)" ]]; then
             BACKEND="azure-blob"
+        elif [[ -d "$GCP_TF_DIR" ]] && [[ -n "$(terraform -chdir="$GCP_TF_DIR" output -json deployment 2>/dev/null \
+            | jq -r '.bucket // empty' 2>/dev/null)" ]]; then
+            BACKEND="gcs"
         else
             cat >&2 <<'MSG'
 ERROR: no storage backend detected. Pick one explicitly with --backend:
@@ -197,6 +205,8 @@ ERROR: no storage backend detected. Pick one explicitly with --backend:
                            when s3_bucket_enabled = true)
   --backend azure-blob   — Azure Blob Storage; set STORAGE_ACCOUNT and STORAGE_KEY
                            (or use the osmo Azure TF Storage Account output)
+  --backend gcs          — Google Cloud Storage via HMAC; set GCS_BUCKET / GCS_ACCESS_KEY_ID /
+                           GCS_ACCESS_KEY (or use the osmo GCP TF deployment output)
   --backend byo          — bring-your-own S3-compatible; set:
                              STORAGE_ACCESS_KEY_ID STORAGE_ACCESS_KEY
                              STORAGE_ENDPOINT [STORAGE_REGION] [STORAGE_OVERRIDE_URL]

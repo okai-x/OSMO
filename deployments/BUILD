@@ -17,6 +17,9 @@ SPDX-License-Identifier: Apache-2.0
 """
 
 exports_files([
+    "scripts/configure-storage.sh",
+    "scripts/storage/common.sh",
+    "scripts/storage/gcs.sh",
     "scripts/gcp/terraform.sh",
     "scripts/deploy-osmo-gcp.sh",
     "scripts/gcp/values.jq",
