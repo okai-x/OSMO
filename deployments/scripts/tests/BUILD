@@ -21,6 +21,16 @@ sh_test(
 )
 
 sh_test(
+    name = "test_gcp_terraform_driver",
+    size = "small",
+    srcs = ["test_gcp_terraform_driver.sh"],
+    data = [
+        "//deployments:scripts/common.sh",
+        "//deployments:scripts/gcp/terraform.sh",
+    ],
+)
+
+sh_test(
     name = "test_azure_terraform_driver",
     size = "small",
     srcs = ["test_azure_terraform_driver.sh"],
