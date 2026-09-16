@@ -124,11 +124,12 @@ bash deployments/charts/service/tests/render-tests.sh
 | `service/` | OSMO control-plane services, UI, gateway, and optional development dependencies. |
 | `backend-operator/` | Compute-plane backend listener, worker, test runner, RBAC, and scheduler integration. |
 
-The GCP development installer is `deployments/scripts/deploy-osmo-gcp.sh`, backed
-by `deployments/terraform/gcp/example/`. It installs the unified chart on GKE with
-Cloud SQL, Memorystore and GCS HMAC credentials. Its mocked deployment test is
-`//deployments/scripts/tests:test_deploy_osmo_gcp`; GCS chart validation is covered
-by `deployments/charts/osmo/tests/test_osmo_charts.sh`.
+The GCP path of `deployments/scripts/deploy-osmo-minimal.sh` (`--provider gcp`) is
+the driver `deployments/scripts/gcp/terraform.sh`, backed by
+`deployments/terraform/gcp/example/`; object storage uses the `gcs` backend of
+`configure-storage.sh`. Mocked tests: `//deployments/scripts/tests:test_gcp_terraform_driver`,
+`test_configure_storage_gcs` and `test_gpu_pool_values_selection`. GCS chart
+validation is covered by `deployments/charts/osmo/tests/test_osmo_charts.sh`.
 
 ### Python Libraries (`lib/`)
 
