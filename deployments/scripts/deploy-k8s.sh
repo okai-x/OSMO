@@ -50,14 +50,18 @@ OSMO_NAMESPACE="${OSMO_NAMESPACE:-osmo-minimal}"
 OSMO_OPERATOR_NAMESPACE="${OSMO_OPERATOR_NAMESPACE:-osmo-operator}"
 OSMO_WORKFLOWS_NAMESPACE="${OSMO_WORKFLOWS_NAMESPACE:-osmo-workflows}"
 
-OSMO_IMAGE_REGISTRY="${OSMO_IMAGE_REGISTRY:-nvcr.io/nvidia/osmo}"
+OSMO_IMAGE_REGISTRY="${OSMO_IMAGE_REGISTRY:-osmo}"
+OSMO_IMAGE_TAG="${OSMO_IMAGE_TAG:-}"
+OSMO_IMAGE_PULL_POLICY="${OSMO_IMAGE_PULL_POLICY:-}"
+# Use charts from the same checkout as scripts/build-images.sh. An explicitly
+# empty directory selects the remote Helm repository instead.
+OSMO_CHART_DIR="${OSMO_CHART_DIR-$SCRIPT_DIR/../charts}"
 OSMO_HELM_REPO_NAME="${OSMO_HELM_REPO_NAME:-osmo-deploy}"
 OSMO_HELM_REPO_URL="${OSMO_HELM_REPO_URL:-https://helm.ngc.nvidia.com/nvidia/osmo}"
 # Chart version pin. Empty string = let helm pick the latest stable. For 6.3
 # prerelease testing, set OSMO_CHART_VERSION=1.3.0-prerelease-rc1 (or similar
 # `--devel`-tagged version) to match the prerelease image tag.
 OSMO_CHART_VERSION="${OSMO_CHART_VERSION:-}"
-OSMO_IMAGE_TAG="${OSMO_IMAGE_TAG:-latest}"
 BACKEND_TOKEN_SECRET_NAME="${BACKEND_TOKEN_SECRET_NAME:-osmo-operator-token}"
 NGC_API_KEY="${NGC_API_KEY:-}"
 # NGC pull-secret name. Empty by default → no NGC plumbing anywhere (volume
@@ -840,7 +844,58 @@ create_image_pull_secrets() {
 # Helm Functions
 ###############################################################################
 
+resolve_image_settings() {
+    if [[ -z "$OSMO_IMAGE_TAG" ]]; then
+        local repository_root="$SCRIPT_DIR/../.."
+        local source_commit version
+        source_commit=$(git -C "$repository_root" rev-parse HEAD) || return 1
+        version=$(awk '/^major:/ {major=$2} /^minor:/ {minor=$2} /^revision:/ {revision=$2}
+            END {printf "%s.%s.%s", major, minor, revision}' \
+            "$repository_root/src/lib/utils/version.yaml") || return 1
+        if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            log_error 'Cannot determine the source version; set OSMO_IMAGE_TAG explicitly.'
+            return 1
+        fi
+        OSMO_IMAGE_TAG="${version}-prana-${source_commit:0:8}"
+    fi
+    if [[ ! "$OSMO_IMAGE_TAG" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$ ]]; then
+        log_error "Invalid OSMO_IMAGE_TAG: $OSMO_IMAGE_TAG"
+        return 1
+    fi
+    OSMO_IMAGE_REGISTRY="${OSMO_IMAGE_REGISTRY%/}"
+    if [[ -z "$OSMO_IMAGE_PULL_POLICY" ]]; then
+        if [[ "$OSMO_IMAGE_REGISTRY" == osmo ]]; then
+            OSMO_IMAGE_PULL_POLICY=Never
+        else
+            OSMO_IMAGE_PULL_POLICY=Always
+        fi
+    fi
+    case "$OSMO_IMAGE_PULL_POLICY" in
+        Always|IfNotPresent|Never) ;;
+        *) log_error "Invalid OSMO_IMAGE_PULL_POLICY: $OSMO_IMAGE_PULL_POLICY"; return 1 ;;
+    esac
+}
+
+osmo_chart_reference() {
+    if [[ -n "$OSMO_CHART_DIR" ]]; then
+        printf '%s/%s' "$OSMO_CHART_DIR" "$1"
+    else
+        printf '%s/%s' "$OSMO_HELM_REPO_NAME" "$1"
+    fi
+}
+
 add_helm_repos() {
+    if [[ -n "$OSMO_CHART_DIR" ]]; then
+        local chart
+        for chart in service backend-operator; do
+            if [[ ! -f "$OSMO_CHART_DIR/$chart/Chart.yaml" ]]; then
+                log_error "Local chart not found: $OSMO_CHART_DIR/$chart"
+                return 1
+            fi
+        done
+        log_info "Using checkout charts: $OSMO_CHART_DIR"
+        return
+    fi
     log_info "Adding Helm repositories..."
 
     if [[ "$DRY_RUN" == true ]]; then
@@ -916,9 +971,17 @@ resolve_static_values() {
 # values (PG/Redis hosts, image tag, namespace, NGC pull secret name) live here
 # so values/service.yaml can stay generic and self-documenting.
 service_set_flags() {
+    resolve_image_settings || return 1
     local sets=""
     sets+=" --set global.osmoImageLocation=${OSMO_IMAGE_REGISTRY}"
     sets+=" --set global.osmoImageTag=${OSMO_IMAGE_TAG}"
+    local component
+    for component in service agent worker logger router delayedJobMonitor ui mcp; do
+        sets+=" --set services.${component}.imagePullPolicy=${OSMO_IMAGE_PULL_POLICY}"
+    done
+    sets+=" --set gateway.authz.imagePullPolicy=${OSMO_IMAGE_PULL_POLICY}"
+    sets+=" --set services.masterEncryptionKey.bootstrap.imagePullPolicy=${OSMO_IMAGE_PULL_POLICY}"
+    sets+=" --set services.masterEncryptionKey.rotation.imagePullPolicy=${OSMO_IMAGE_PULL_POLICY}"
 
     # Single source of truth: NGC_SECRET_NAME is non-empty iff the caller
     # opted into pull-secret plumbing (--ngc-api-key auto-defaults it to
@@ -1000,16 +1063,28 @@ service_set_flags() {
     # into every workflow Pod spec by the backend-worker — empty fields cause K8s 422.
     sets+=" --set services.configs.workflow.backend_images.init=${OSMO_IMAGE_REGISTRY}/init-container:${OSMO_IMAGE_TAG}"
     sets+=" --set services.configs.workflow.backend_images.client=${OSMO_IMAGE_REGISTRY}/client:${OSMO_IMAGE_TAG}"
-
+    # The runtime defaults to Always. Apply this template after default_ctrl
+    # and default_user, preserving their resources and third-party user images.
+    local template="services.configs.podTemplates.osmo_image_policy.spec"
+    sets+=" --set ${template}.initContainers[0].name=osmo-init"
+    sets+=" --set ${template}.initContainers[0].imagePullPolicy=${OSMO_IMAGE_PULL_POLICY}"
+    sets+=" --set ${template}.containers[0].name=osmo-ctrl"
+    sets+=" --set ${template}.containers[0].imagePullPolicy=${OSMO_IMAGE_PULL_POLICY}"
 
     echo "$sets"
 }
 
 # Build the chain of `--set` overrides for the backend-operator chart.
 backend_operator_set_flags() {
+    resolve_image_settings || return 1
     local sets=""
     sets+=" --set global.osmoImageLocation=${OSMO_IMAGE_REGISTRY}"
     sets+=" --set global.osmoImageTag=${OSMO_IMAGE_TAG}"
+    sets+=" --set services.backendListener.imagePullPolicy=${OSMO_IMAGE_PULL_POLICY}"
+    sets+=" --set services.backendWorker.imagePullPolicy=${OSMO_IMAGE_PULL_POLICY}"
+    sets+=" --set backendTestRunner.podTemplate.image.repository=${OSMO_IMAGE_REGISTRY}/backend-test-runner"
+    sets+=" --set backendTestRunner.podTemplate.image.tag=${OSMO_IMAGE_TAG}"
+    sets+=" --set backendTestRunner.podTemplate.image.pullPolicy=${OSMO_IMAGE_PULL_POLICY}"
 
     if [[ -n "$NGC_SECRET_NAME" ]]; then
         sets+=" --set global.imagePullSecret=${NGC_SECRET_NAME}"
@@ -1031,7 +1106,7 @@ backend_operator_set_flags() {
 # nothing so helm picks the latest stable. Required for 6.3 prerelease testing
 # because `helm install` ignores prerelease tags by default.
 chart_version_flag() {
-    if [[ -n "${OSMO_CHART_VERSION:-}" ]]; then
+    if [[ -z "$OSMO_CHART_DIR" && -n "${OSMO_CHART_VERSION:-}" ]]; then
         echo " --version $OSMO_CHART_VERSION"
     fi
 }
@@ -1171,11 +1246,13 @@ backend_operator_helm_flags() {
 }
 
 render_osmo_service_chart() {
-    $RUN_HELM "template osmo-minimal $OSMO_HELM_REPO_NAME/service$(service_helm_flags)"
+    resolve_image_settings || return 1
+    $RUN_HELM "template osmo-minimal $(osmo_chart_reference service)$(service_helm_flags)"
 }
 
 render_backend_operator_chart() {
-    $RUN_HELM "template osmo-operator $OSMO_HELM_REPO_NAME/backend-operator$(backend_operator_helm_flags)"
+    resolve_image_settings || return 1
+    $RUN_HELM "template osmo-operator $(osmo_chart_reference backend-operator)$(backend_operator_helm_flags)"
 }
 
 # Layer values/gpu-pool.yaml when OSMO_GPU_POOL_ENABLED=true (set automatically
@@ -1221,6 +1298,7 @@ render_gpu_pool_values() {
 }
 
 deploy_osmo_service() {
+    resolve_image_settings || return 1
     log_info "Deploying OSMO service..."
 
     if [[ "$DRY_RUN" == true ]]; then
@@ -1247,12 +1325,13 @@ deploy_osmo_service() {
     # + AKS image pulls (~3-5 min) + Postgres + service init can push past 10m
     # on a fresh cluster. Override via HELM_TIMEOUT_SERVICE for slower envs.
     $RUN_HELM \
-        "upgrade --install osmo-minimal $OSMO_HELM_REPO_NAME/service --wait --timeout ${HELM_TIMEOUT_SERVICE:-15m}$(service_helm_flags)"
+        "upgrade --install osmo-minimal $(osmo_chart_reference service) --wait --timeout ${HELM_TIMEOUT_SERVICE:-15m}$(service_helm_flags)"
 
     log_success "OSMO service deployed"
 }
 
 setup_backend_operator() {
+    resolve_image_settings || return 1
     log_info "Setting up Backend Operator..."
 
     if [[ "$DRY_RUN" == true ]]; then
@@ -1264,7 +1343,7 @@ setup_backend_operator() {
     # backend-operator.yaml first, generated per-cluster overrides next, then
     # user overrides last so an explicit caller value always wins.
     $RUN_HELM \
-        "upgrade --install osmo-operator $OSMO_HELM_REPO_NAME/backend-operator --wait --timeout ${HELM_TIMEOUT_OPERATOR:-10m}$(backend_operator_helm_flags)"
+        "upgrade --install osmo-operator $(osmo_chart_reference backend-operator) --wait --timeout ${HELM_TIMEOUT_OPERATOR:-10m}$(backend_operator_helm_flags)"
 
     log_success "Backend Operator deployed"
 }
@@ -1360,7 +1439,14 @@ print_access_instructions() {
 
 deploy_k8s_main() {
     parse_k8s_args "$@"
+    resolve_image_settings
     setup_provider
+
+    if [[ -n "$OSMO_CHART_DIR" && "$IS_PRIVATE_CLUSTER" == true ]]; then
+        log_error 'Local charts require direct Kubernetes access; the private AKS command-invoke runner cannot read checkout files.'
+        return 1
+    fi
+    log_info "OSMO images: $OSMO_IMAGE_REGISTRY/<component>:$OSMO_IMAGE_TAG (pull policy: $OSMO_IMAGE_PULL_POLICY)"
 
     # K8s deployment
     check_command "kubectl"

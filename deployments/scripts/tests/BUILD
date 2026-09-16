@@ -75,6 +75,20 @@ sh_test(
 )
 
 sh_test(
+    name = "test_prana_images",
+    size = "small",
+    srcs = ["test_prana_images.sh"],
+    data = [
+        "//deployments/charts:service",
+        "//deployments/charts:backend-operator",
+        "//deployments:scripts/common.sh",
+        "//deployments:scripts/deploy-k8s.sh",
+        "//deployments:values/backend-operator.yaml",
+        "//deployments:values/service.yaml",
+    ],
+)
+
+sh_test(
     name = "test_helm_render_path",
     srcs = ["test_helm_render_path.sh"],
     size = "small",

@@ -24,6 +24,38 @@ single-plane installer uses the unified chart on Azure.
 
 ## Quick Start
 
+The minimal deployment uses this checkout's service/backend charts and images
+built by `scripts/build-images.sh`: `osmo/<component>:<version>-prana-<commit-first-8>`.
+The default tag follows the current checkout; set `OSMO_IMAGE_TAG` explicitly
+when using an older build or a custom build tag. For example:
+
+```bash
+export OSMO_IMAGE_TAG=6.4.0-prana-9a060662
+```
+
+Local images use `imagePullPolicy: Never`. Before deploying, import the images
+into the container runtime of every eligible control-plane and backend node;
+images in the host Docker daemon alone are insufficient for KIND or MicroK8s.
+This script does not import images. Cloud nodes must either have the images
+preloaded or use a reachable registry. After pushing with the build script,
+select Artifact Registry with:
+
+```bash
+export OSMO_IMAGE_REGISTRY=asia-southeast1-docker.pkg.dev/pranalab-infra/osmo
+export OSMO_IMAGE_TAG=6.4.0-prana-9a060662
+# Remote prefixes default to imagePullPolicy: Always.
+```
+
+Nodes must have permission to pull from that repository. The prefix and tag
+cover control-plane services, backend listener/worker/test runner, and workflow
+init/client images. Third-party images keep their chart settings. The default
+workflow pool appends `osmo_image_policy` to its resource templates; custom
+pools must include that template to inherit `OSMO_IMAGE_PULL_POLICY`.
+
+To use published charts instead, set `OSMO_CHART_DIR=""` and optionally pin
+`OSMO_CHART_VERSION`. Local charts require direct Kubernetes access; the private
+AKS command-invoke runner cannot read files from this checkout.
+
 ```bash
 # Azure: provision AKS + PG + Redis + Blob, then install OSMO
 ./deploy-osmo-minimal.sh --provider azure
@@ -392,11 +424,13 @@ Pre-create the IAM role with the OSMO service-account trust, then:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `OSMO_IMAGE_REGISTRY` | OSMO Docker image registry | `nvcr.io/nvidia/osmo` |
-| `OSMO_IMAGE_TAG` | OSMO Docker image tag | `latest` |
-| `OSMO_CHART_VERSION` | Pin OSMO Helm chart version. **Required** for prerelease channels (chart RCs aren't tagged `latest`). | _(latest in repo)_ |
+| `OSMO_IMAGE_REGISTRY` | Minimal-deployment OSMO image prefix | `osmo` |
+| `OSMO_IMAGE_TAG` | Image tag matching `scripts/build-images.sh`; override for an existing build | `<source-version>-prana-<commit-first-8>` |
+| `OSMO_IMAGE_PULL_POLICY` | Pull policy for OSMO services and default-pool runtime containers | `Never` for `osmo`, otherwise `Always` |
+| `OSMO_CHART_DIR` | Directory containing service/backend-operator charts; empty selects the remote repo | This checkout's `deployments/charts` |
+| `OSMO_CHART_VERSION` | Pin remote chart version, used only when `OSMO_CHART_DIR=""` | _(latest in repo)_ |
 | `OSMO_HELM_REPO_URL` | OSMO Helm chart repository URL. Override to use another chart repository. | `https://helm.ngc.nvidia.com/nvidia/osmo` |
-| `OSMO_HELM_REPO_NAME` | Local helm repo alias | `osmo` |
+| `OSMO_HELM_REPO_NAME` | Local helm repo alias | `osmo-deploy` |
 | `BACKEND_TOKEN_SECRET_NAME` | Shared backend bootstrap Secret name | `osmo-operator-token` |
 | `OSMO_REACHABILITY_PATH` | Lightweight unauthenticated path used by `verify.sh` for the pre-login reachability probe | `/api/version` |
 | `OSMO_REACHABILITY_TIMEOUT_SECONDS` | Curl timeout for the `verify.sh` reachability probe | `5` |
@@ -500,7 +534,9 @@ az aks command invoke \
 
 ### Helm install fails: "no chart matching constraint"
 
-Likely cause: testing against a prerelease tag without setting `OSMO_CHART_VERSION` (chart RCs aren't tagged `latest`). Set both `OSMO_IMAGE_TAG` and `OSMO_CHART_VERSION` to the matching RC and point `OSMO_HELM_REPO_URL` at the staging repo.
+This applies to remote chart mode (`OSMO_CHART_DIR=""`). When testing a prerelease,
+set `OSMO_CHART_VERSION` to its published RC version and select the matching
+image prefix/tag. Local chart mode does not query the Helm repository.
 
 ## Documentation
 
