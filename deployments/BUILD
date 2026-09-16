@@ -42,6 +42,8 @@ exports_files([
     "terraform/azure/example/workload-identity-object-storage.tf",
     "terraform/azure/example/variables.tf",
     "values/backend-operator.yaml",
+    "values/gpu-pool-gke.yaml",
+    "values/gpu-pool.yaml",
     "values/service.yaml",
     "workflows/verify-hello.yaml",
     "workflows/verify-object-storage.yaml",

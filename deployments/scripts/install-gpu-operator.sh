@@ -28,6 +28,8 @@
 #  - working nvidia-device-plugin DaemonSet
 #
 # Honors --no-gpu / NO_GPU=1 to skip entirely.
+# Honors SKIP_GPU_OPERATOR=1 when the platform manages drivers and the device
+# plugin itself (GKE installs them per node pool); GPU workloads still run.
 ###############################################################################
 
 set -euo pipefail
@@ -96,6 +98,10 @@ detect_existing_gpu_stack() {
 main() {
     if [[ "$NO_GPU" == "1" ]]; then
         log_info "NO_GPU=1 — skipping GPU Operator install"
+        return 0
+    fi
+    if [[ "${SKIP_GPU_OPERATOR:-0}" == "1" ]]; then
+        log_info "SKIP_GPU_OPERATOR=1 — the cluster manages GPU drivers itself; skipping GPU Operator install"
         return 0
     fi
 
