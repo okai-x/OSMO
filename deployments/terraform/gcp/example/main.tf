@@ -152,6 +152,47 @@ resource "google_container_node_pool" "cpu" {
   }
 }
 
+# Optional GPU pool. GKE installs the NVIDIA driver and device plugin on these
+# nodes and adds the nvidia.com/gpu=present:NoSchedule taint itself, so the
+# pool declares no taint and the cluster needs no GPU Operator.
+resource "google_container_node_pool" "gpu" {
+  count    = var.gpu_node_pool_enabled ? 1 : 0
+  name     = "gpu"
+  location = var.zone
+  cluster  = google_container_cluster.osmo.name
+  autoscaling {
+    total_min_node_count = 0
+    total_max_node_count = var.gpu_node_pool_max_size
+    location_policy      = "ANY"
+  }
+  node_config {
+    machine_type    = var.gpu_machine_type
+    disk_size_gb    = 100
+    disk_type       = "hyperdisk-balanced"
+    image_type      = "COS_CONTAINERD"
+    spot            = var.gpu_spot
+    service_account = google_service_account.nodes.email
+    oauth_scopes    = ["https://www.googleapis.com/auth/cloud-platform"]
+    labels = {
+      osmo-workload = "gpu"
+    }
+    guest_accelerator {
+      type  = var.gpu_accelerator_type
+      count = var.gpu_accelerator_count
+      gpu_driver_installation_config {
+        gpu_driver_version = "LATEST"
+      }
+    }
+    workload_metadata_config {
+      mode = "GKE_METADATA"
+    }
+  }
+  management {
+    auto_repair  = true
+    auto_upgrade = true
+  }
+}
+
 resource "random_password" "postgres" {
   length  = 32
   special = false

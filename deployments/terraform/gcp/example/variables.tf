@@ -51,3 +51,39 @@ variable "bucket_force_destroy" {
   type        = bool
   default     = false
 }
+
+variable "gpu_node_pool_enabled" {
+  description = "Create a GPU node pool that scales from zero."
+  type        = bool
+  default     = false
+}
+
+variable "gpu_machine_type" {
+  description = "Machine type of the GPU node pool."
+  type        = string
+  default     = "g4-standard-48"
+}
+
+variable "gpu_accelerator_type" {
+  description = "Accelerator attached to each GPU node."
+  type        = string
+  default     = "nvidia-rtx-pro-6000"
+}
+
+variable "gpu_accelerator_count" {
+  description = "GPUs per node."
+  type        = number
+  default     = 1
+}
+
+variable "gpu_node_pool_max_size" {
+  description = "Autoscaler ceiling for the GPU node pool. Shares regional GPU quota with other clusters in the project."
+  type        = number
+  default     = 2
+}
+
+variable "gpu_spot" {
+  description = "Use Spot VMs for GPU nodes. Spot capacity is not guaranteed."
+  type        = bool
+  default     = true
+}

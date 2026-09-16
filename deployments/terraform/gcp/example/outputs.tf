@@ -7,6 +7,7 @@ output "deployment" {
   value = {
     project_id        = var.project_id
     cluster_name      = google_container_cluster.osmo.name
+    gpu_node_pool     = var.gpu_node_pool_enabled ? google_container_node_pool.gpu[0].name : ""
     region            = var.region
     zone              = var.zone
     postgres_host     = google_sql_database_instance.osmo.private_ip_address

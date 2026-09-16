@@ -9,7 +9,9 @@ depend on the separate `infra` repository. It does not adopt existing clusters.
 - Dedicated VPC, private subnet, Cloud NAT and private service access.
 - Zonal GKE Standard cluster, DNS control-plane endpoint, private nodes and
   Workload Identity Federation enabled. The CPU pool has two `e2-standard-4`
-  nodes. No GPU node pool or GPU Operator is installed.
+  nodes. `gpu_node_pool_enabled = true` adds a Spot GPU pool that scales from
+  zero to `gpu_node_pool_max_size`; GKE installs the driver, so no GPU Operator
+  is needed. GPU quota is per project and region, not per cluster.
 - Private Cloud SQL PostgreSQL 16, zonal availability, backups and point-in-time
   recovery. The database uses `db-custom-2-7680`.
 - Private Memorystore Redis 7.2, BASIC tier, 1 GiB, AUTH enabled. TLS is on by
