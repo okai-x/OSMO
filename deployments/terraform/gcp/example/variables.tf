@@ -35,3 +35,19 @@ variable "deletion_protection" {
   type        = bool
   default     = true
 }
+
+variable "redis_transit_encryption_mode" {
+  description = "Memorystore in-transit encryption. SERVER_AUTHENTICATION needs clients that trust the instance CA; DISABLED keeps Redis traffic unencrypted inside the private VPC."
+  type        = string
+  default     = "SERVER_AUTHENTICATION"
+  validation {
+    condition     = contains(["SERVER_AUTHENTICATION", "DISABLED"], var.redis_transit_encryption_mode)
+    error_message = "redis_transit_encryption_mode must be SERVER_AUTHENTICATION or DISABLED."
+  }
+}
+
+variable "bucket_force_destroy" {
+  description = "Delete remaining objects when the bucket is destroyed. Only for disposable development environments."
+  type        = bool
+  default     = false
+}

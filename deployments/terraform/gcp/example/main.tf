@@ -198,7 +198,7 @@ resource "google_redis_instance" "osmo" {
   authorized_network      = google_compute_network.osmo.id
   connect_mode            = "PRIVATE_SERVICE_ACCESS"
   auth_enabled            = true
-  transit_encryption_mode = "SERVER_AUTHENTICATION"
+  transit_encryption_mode = var.redis_transit_encryption_mode
   depends_on              = [google_service_networking_connection.services]
 }
 
@@ -211,7 +211,7 @@ resource "google_storage_bucket" "osmo" {
   location                    = var.region
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
-  force_destroy               = false
+  force_destroy               = var.bucket_force_destroy
   depends_on                  = [google_project_service.apis]
 }
 

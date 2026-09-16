@@ -12,8 +12,11 @@ depend on the separate `infra` repository. It does not adopt existing clusters.
   nodes. No GPU node pool or GPU Operator is installed.
 - Private Cloud SQL PostgreSQL 16, zonal availability, backups and point-in-time
   recovery. The database uses `db-custom-2-7680`.
-- Private Memorystore Redis 7.2, BASIC tier, 1 GiB, AUTH and TLS enabled.
+- Private Memorystore Redis 7.2, BASIC tier, 1 GiB, AUTH enabled. TLS is on by
+  default; `redis_transit_encryption_mode = "DISABLED"` turns it off for clients
+  that cannot trust the instance CA.
 - Private GCS bucket, bucket-scoped storage service account and HMAC credentials.
+  `bucket_force_destroy = true` lets `destroy` empty a non-empty bucket.
 - GKE node service account with the default node role and Artifact Registry read
   access in the target project. Artifact Registry repositories/images are not created.
 
