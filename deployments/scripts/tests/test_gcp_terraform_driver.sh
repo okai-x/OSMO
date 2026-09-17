@@ -90,4 +90,29 @@ gcp_run_kubectl "get pods -n osmo"
 grep -Fq 'kubectl get pods -n osmo' "$command_log" || fail "string-form kubectl wrapper failed"
 gcp_run_kubectl get nodes -o name
 grep -Fq 'kubectl get nodes -o name' "$command_log" || fail "argv-form kubectl wrapper failed"
-echo "PASS: GCP Terraform driver"
+# Exercise the actual main dispatch without invoking cloud or cluster commands.
+source <(sed -n '/^main() {$/,/^}$/p' \
+    "${TEST_SRCDIR}/_main/deployments/scripts/deploy-osmo-minimal.sh")
+setup_provider_env() { :; }
+preflight_checks() { :; }
+handle_configuration() { echo configure >>"$command_log"; }
+run_terraform_init() { echo init >>"$command_log"; }
+run_terraform_apply() { echo apply >>"$command_log"; }
+get_terraform_outputs() { echo outputs >>"$command_log"; }
+verify_provider_config() { echo verify >>"$command_log"; }
+configure_kubectl() { echo kubeconfig >>"$command_log"; }
+install_cluster_dependencies() { fail "unexpected cluster mutation"; }
+PROVIDER=gcp DESTROY=false SKIP_OSMO=true
+for SKIP_TERRAFORM in false true; do
+    : >"$command_log"
+    (DRY_RUN=false main)
+    expected=$'outputs\nverify\nkubeconfig'
+    if [[ "$SKIP_TERRAFORM" == false ]]; then
+        expected=$'configure\ninit\napply\n'"$expected"
+    fi
+    [[ "$(cat "$command_log")" == "$expected" ]] || fail "GCP bootstrap dispatch skipped or out of order"
+done
+: >"$command_log"
+(SKIP_TERRAFORM=false DRY_RUN=true main)
+[[ "$(cat "$command_log")" == $'configure\ninit\napply' ]] || fail "dry-run reached cluster configuration"
+echo "PASS: GCP Terraform driver and main dispatch"
