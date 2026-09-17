@@ -12,6 +12,11 @@ depend on the separate `infra` repository. It does not adopt existing clusters.
   nodes. `gpu_node_pool_enabled = true` adds a Spot GPU pool that scales from
   zero to `gpu_node_pool_max_size`; GKE installs the driver, so no GPU Operator
   is needed. GPU quota is per project and region, not per cluster.
+  `training_node_pool_enabled = true` adds a `training-cpu` pool tainted
+  `osmo-workload=training:NoSchedule` that autoscales between
+  `training_node_pool_min_size` (default 1) and `training_node_pool_max_size`
+  (default 2). OSMO workflow pods select it through the
+  `cloud.google.com/gke-nodepool` label; platform services stay on the CPU pool.
 - Private Cloud SQL PostgreSQL 16, zonal availability, backups and point-in-time
   recovery. The database uses `db-custom-2-7680`.
 - Private Memorystore Redis 7.2, BASIC tier, 1 GiB, AUTH enabled. TLS is on by
@@ -57,8 +62,10 @@ The driver sets `redis_transit_encryption_mode = "DISABLED"` because the minimal
 service chart trusts only public CAs, and `deletion_protection = false` plus
 `bucket_force_destroy = true` so that `--destroy` removes the environment
 completely. `--gpu-node-pool` enables the Spot GPU pool; `TF_GPU_MACHINE_TYPE`
-and `TF_GPU_ACCELERATOR_TYPE` override its shape. Edit `terraform.tfvars` for any
-other variable and re-run.
+and `TF_GPU_ACCELERATOR_TYPE` override its shape. `TF_TRAINING_NODE_POOL_ENABLED=true`
+enables the training pool; `TF_TRAINING_MACHINE_TYPE`,
+`TF_TRAINING_NODE_POOL_MIN_SIZE` and `TF_TRAINING_NODE_POOL_MAX_SIZE` override
+its shape. Edit `terraform.tfvars` for any other variable and re-run.
 
 Direct Terraform use works too: create `terraform.tfvars` with at least
 `project_id` and `cluster_name`, then run `terraform init` and `terraform apply`

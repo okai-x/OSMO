@@ -87,3 +87,31 @@ variable "gpu_spot" {
   type        = bool
   default     = true
 }
+
+variable "training_node_pool_enabled" {
+  description = "Create a tainted CPU training node pool for OSMO workflow pods; platform services stay on the cpu pool."
+  type        = bool
+  default     = false
+}
+
+variable "training_machine_type" {
+  description = "Machine type of the CPU training node pool."
+  type        = string
+  default     = "e2-standard-4"
+}
+
+variable "training_node_pool_min_size" {
+  description = "Autoscaler floor for the training pool. OSMO rejects submissions to a pool with no online node, so keep at least 1 until scale-from-zero is handled."
+  type        = number
+  default     = 1
+}
+
+variable "training_node_pool_max_size" {
+  description = "Autoscaler ceiling for the training pool."
+  type        = number
+  default     = 2
+  validation {
+    condition     = var.training_node_pool_max_size >= var.training_node_pool_min_size
+    error_message = "training_node_pool_max_size must be >= training_node_pool_min_size."
+  }
+}
