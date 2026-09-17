@@ -13,10 +13,12 @@ depend on the separate `infra` repository. It does not adopt existing clusters.
   zero to `gpu_node_pool_max_size`; GKE installs the driver, so no GPU Operator
   is needed. GPU quota is per project and region, not per cluster.
   `training_node_pool_enabled = true` adds a `training-cpu` pool tainted
-  `osmo-workload=training:NoSchedule` that autoscales between
-  `training_node_pool_min_size` (default 1) and `training_node_pool_max_size`
-  (default 2). OSMO workflow pods select it through the
-  `cloud.google.com/gke-nodepool` label; platform services stay on the CPU pool.
+  `osmo-workload=training:NoSchedule` that starts at `training_node_pool_min_size`
+  nodes (default 1) and autoscales up to `training_node_pool_max_size` (default 2)
+  for pending pods. The autoscaler never raises an empty pool to its floor on its
+  own, so raising the floor later needs a manual resize. OSMO workflow pods select
+  the pool through the `cloud.google.com/gke-nodepool` label; platform services
+  stay on the CPU pool.
 - Private Cloud SQL PostgreSQL 16, zonal availability, backups and point-in-time
   recovery. The database uses `db-custom-2-7680`.
 - Private Memorystore Redis 7.2, BASIC tier, 1 GiB, AUTH enabled. TLS is on by
