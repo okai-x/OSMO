@@ -195,13 +195,19 @@ resource "google_container_node_pool" "gpu" {
 
 # Optional CPU training pool. Workflow pods select it through GKE's built-in
 # cloud.google.com/gke-nodepool label and tolerate its taint; platform
-# components carry neither, so they stay on the cpu pool. Like the GPU pool it
-# declares no node_count: the cluster autoscaler brings it to the floor.
+# components carry neither, so they stay on the cpu pool.
+#
+# The pool must start at its floor: the GKE cluster autoscaler only adds nodes
+# for pending pods and leaves an empty pool at zero, while OSMO rejects
+# submissions to a pool with no online node. GKE rewrites initialNodeCount on
+# every resize, autoscaling included, so drift on it is ignored; otherwise the
+# next plan would force a replacement.
 resource "google_container_node_pool" "training" {
-  count    = var.training_node_pool_enabled ? 1 : 0
-  name     = "training-cpu"
-  location = var.zone
-  cluster  = google_container_cluster.osmo.name
+  count              = var.training_node_pool_enabled ? 1 : 0
+  name               = "training-cpu"
+  location           = var.zone
+  cluster            = google_container_cluster.osmo.name
+  initial_node_count = var.training_node_pool_min_size
   autoscaling {
     total_min_node_count = var.training_node_pool_min_size
     total_max_node_count = var.training_node_pool_max_size
@@ -226,6 +232,9 @@ resource "google_container_node_pool" "training" {
   management {
     auto_repair  = true
     auto_upgrade = true
+  }
+  lifecycle {
+    ignore_changes = [initial_node_count]
   }
 }
 
