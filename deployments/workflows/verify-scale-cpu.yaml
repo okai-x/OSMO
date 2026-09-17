@@ -1,0 +1,45 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# CPU scale-up test for an autoscaled training pool (see
+# deployments/terraform/gcp/example/README.md). The two tasks form one group,
+# so KAI gang-schedules them: neither starts until both fit. Each pod requests
+# the task resource plus osmo-ctrl's 1 CPU / 1Gi, i.e. 2 CPU / 2Gi. One pod
+# fits an otherwise empty e2-standard-4 node (3920m allocatable minus GKE
+# DaemonSets), two do not, so the group stays pending until the cluster
+# autoscaler adds a second node. queue_timeout covers node provisioning.
+#
+# Pass criteria: both tasks COMPLETED with exit code 0, tasks placed on two
+# different training nodes, and a GKE TriggeredScaleUp event for the pool.
+workflow:
+  name: verify-scale-cpu
+  timeout:
+    exec_timeout: 5m
+    queue_timeout: 15m
+  resources:
+    tiny:
+      cpu: 1
+      memory: 1Gi
+      storage: 1Gi
+  groups:
+  - name: pair
+    tasks:
+    - name: lead
+      image: alpine:3.20
+      lead: true
+      resource: tiny
+      command: ["sh", "-c"]
+      args:
+      - |
+        set -e
+        echo "lead started on $(hostname) at $(date -u +%FT%TZ)"
+        sleep 30
+    - name: peer
+      image: alpine:3.20
+      resource: tiny
+      command: ["sh", "-c"]
+      args:
+      - |
+        set -e
+        echo "peer started on $(hostname) at $(date -u +%FT%TZ)"
+        sleep 30
