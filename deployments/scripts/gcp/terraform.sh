@@ -42,6 +42,10 @@ TF_GPU_NODE_POOL_ENABLED="${TF_GPU_NODE_POOL_ENABLED:-false}"
 TF_GPU_NODE_POOL_MAX_SIZE="${TF_GPU_NODE_POOL_MAX_SIZE:-2}"
 TF_GPU_MACHINE_TYPE="${TF_GPU_MACHINE_TYPE:-g4-standard-48}"
 TF_GPU_ACCELERATOR_TYPE="${TF_GPU_ACCELERATOR_TYPE:-nvidia-rtx-pro-6000}"
+TF_TRAINING_NODE_POOL_ENABLED="${TF_TRAINING_NODE_POOL_ENABLED:-false}"
+TF_TRAINING_MACHINE_TYPE="${TF_TRAINING_MACHINE_TYPE:-e2-standard-4}"
+TF_TRAINING_NODE_POOL_MIN_SIZE="${TF_TRAINING_NODE_POOL_MIN_SIZE:-1}"
+TF_TRAINING_NODE_POOL_MAX_SIZE="${TF_TRAINING_NODE_POOL_MAX_SIZE:-2}"
 
 ###############################################################################
 # GCP Helper Functions
@@ -138,6 +142,13 @@ gpu_node_pool_enabled  = ${TF_GPU_NODE_POOL_ENABLED}
 gpu_node_pool_max_size = ${TF_GPU_NODE_POOL_MAX_SIZE}
 gpu_machine_type       = "${TF_GPU_MACHINE_TYPE}"
 gpu_accelerator_type   = "${TF_GPU_ACCELERATOR_TYPE}"
+
+# Optional tainted CPU training pool for workflow pods, enabled with
+# TF_TRAINING_NODE_POOL_ENABLED=true. Platform services stay on the cpu pool.
+training_node_pool_enabled  = ${TF_TRAINING_NODE_POOL_ENABLED}
+training_machine_type       = "${TF_TRAINING_MACHINE_TYPE}"
+training_node_pool_min_size = ${TF_TRAINING_NODE_POOL_MIN_SIZE}
+training_node_pool_max_size = ${TF_TRAINING_NODE_POOL_MAX_SIZE}
 EOT
 
     log_success "terraform.tfvars generated for GCP"
@@ -257,6 +268,7 @@ gcp_get_terraform_outputs() {
             kv("GCP_ZONE"; .zone),
             kv("GKE_CLUSTER_NAME"; .cluster_name),
             kv("GKE_GPU_NODE_POOL"; (.gpu_node_pool // "")),
+            kv("GKE_TRAINING_NODE_POOL"; (.training_node_pool // "")),
             kv("POSTGRES_HOST"; .postgres_host),
             kv("POSTGRES_PORT"; "5432"),
             kv("POSTGRES_DB_NAME"; .postgres_database),

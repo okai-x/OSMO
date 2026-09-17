@@ -27,6 +27,7 @@ kubectl() { printf 'kubectl %s\n' "$*" >>"$command_log"; }
 cat >"$fixture" <<'JSON'
 {
   "project_id": "test-project", "cluster_name": "osmo-test", "gpu_node_pool": "gpu",
+  "training_node_pool": "training-cpu",
   "region": "asia-southeast1", "zone": "asia-southeast1-b",
   "postgres_host": "10.50.0.2", "postgres_database": "osmo", "postgres_username": "osmo",
   "postgres_password": "pa'ss$word\"x", "redis_host": "10.50.1.2", "redis_port": 6379,
@@ -54,8 +55,14 @@ grep -Fq 'redis_transit_encryption_mode = "DISABLED"' "$tfvars" || fail "redis T
 grep -Fq 'bucket_force_destroy = true' "$tfvars" || fail "bucket_force_destroy default changed"
 grep -Fq 'deletion_protection  = false' "$tfvars" || fail "deletion_protection default changed"
 grep -Fq 'gpu_node_pool_enabled  = false' "$tfvars" || fail "gpu pool default changed"
+grep -Fq 'training_node_pool_enabled  = false' "$tfvars" || fail "training pool default changed"
 TF_GPU_NODE_POOL_ENABLED=true gcp_generate_tfvars "$tfvars"
 grep -Fq 'gpu_node_pool_enabled  = true' "$tfvars" || fail "gpu pool flag not forwarded"
+TF_TRAINING_NODE_POOL_ENABLED=true TF_TRAINING_NODE_POOL_MAX_SIZE=3 gcp_generate_tfvars "$tfvars"
+grep -Fq 'training_node_pool_enabled  = true' "$tfvars" || fail "training pool flag not forwarded"
+grep -Fq 'training_machine_type       = "e2-standard-4"' "$tfvars" || fail "training machine type default changed"
+grep -Fq 'training_node_pool_min_size = 1' "$tfvars" || fail "training pool floor default changed"
+grep -Fq 'training_node_pool_max_size = 3' "$tfvars" || fail "training pool ceiling not forwarded"
 
 : >"$command_log"
 outputs="$test_directory/outputs.env"
@@ -71,6 +78,14 @@ grep -Fq 'export IS_PRIVATE_CLUSTER=' "$outputs" || fail "private cluster marker
     [[ "$REDIS_PORT" == 6379 && "$POSTGRES_PORT" == 5432 ]] || fail "ports wrong"
     [[ "$GCS_BUCKET" == test-bucket && "$GCS_ACCESS_KEY" == hmac-secret ]] || fail "storage outputs wrong"
     [[ "$GKE_GPU_NODE_POOL" == gpu && "$GKE_CLUSTER_NAME" == osmo-test ]] || fail "cluster outputs wrong"
+    [[ "$GKE_TRAINING_NODE_POOL" == training-cpu ]] || fail "training pool output missing"
+)
+jq 'del(.training_node_pool)' "$fixture" >"$fixture.legacy"
+(
+    fixture="$fixture.legacy"
+    gcp_get_terraform_outputs "$test_directory/terraform" "$test_directory/legacy.env"
+    grep -Fq "export GKE_TRAINING_NODE_POOL=''" "$test_directory/legacy.env" \
+        || fail "state without a training pool must export an empty pool name"
 )
 [[ "$(gcp_get_terraform_output "$test_directory/terraform" bucket)" == test-bucket ]] || fail "single output read failed"
 [[ -z "$(gcp_get_terraform_output "$test_directory/terraform" missing_key)" ]] || fail "missing key should be empty"

@@ -193,6 +193,42 @@ resource "google_container_node_pool" "gpu" {
   }
 }
 
+# Optional CPU training pool. Workflow pods select it through GKE's built-in
+# cloud.google.com/gke-nodepool label and tolerate its taint; platform
+# components carry neither, so they stay on the cpu pool. Like the GPU pool it
+# declares no node_count: the cluster autoscaler brings it to the floor.
+resource "google_container_node_pool" "training" {
+  count    = var.training_node_pool_enabled ? 1 : 0
+  name     = "training-cpu"
+  location = var.zone
+  cluster  = google_container_cluster.osmo.name
+  autoscaling {
+    total_min_node_count = var.training_node_pool_min_size
+    total_max_node_count = var.training_node_pool_max_size
+    location_policy      = "ANY"
+  }
+  node_config {
+    machine_type    = var.training_machine_type
+    disk_size_gb    = 50
+    disk_type       = "pd-balanced"
+    image_type      = "COS_CONTAINERD"
+    service_account = google_service_account.nodes.email
+    oauth_scopes    = ["https://www.googleapis.com/auth/cloud-platform"]
+    taint {
+      key    = "osmo-workload"
+      value  = "training"
+      effect = "NO_SCHEDULE"
+    }
+    workload_metadata_config {
+      mode = "GKE_METADATA"
+    }
+  }
+  management {
+    auto_repair  = true
+    auto_upgrade = true
+  }
+}
+
 resource "random_password" "postgres" {
   length  = 32
   special = false
