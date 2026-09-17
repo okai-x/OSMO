@@ -20,6 +20,7 @@ To customize defaults beyond what `--set` covers, edit these files directly.
 | `gpu-pool.yaml` | When GPU nodes are detected (or `--gpu-node-pool`) | Adds `gpu_toleration` pod template + GPU platform on the default pool. |
 | `gpu-pool-gke.yaml` | `--provider gcp` with GKE accelerator nodes (or `--gpu-node-pool`) | Same platform wiring keyed on GKE's `cloud.google.com/gke-accelerator` label; GKE supplies the driver, so no GPU Operator labels exist. |
 | `pod-monitor-on.yaml` | When prometheus-operator CRDs are detected (or `OSMO_POD_MONITOR_ENABLED=true`) | Re-enables PodMonitor scraping. Off by default to avoid CRD-not-installed errors. |
+| `training-pool-gke.yaml` | Only when passed explicitly: `--helm-values values/training-pool-gke.yaml` | Pins platform components to the GKE `cpu` pool and adds the `training_cpu` pod template (nodeSelector + taint toleration) to the default pool's `default` platform, so only `training-cpu` nodes count toward it. Pairs with `training_node_pool_enabled` in the GCP Terraform example. |
 
 In addition, the storage backend script ([`scripts/configure-storage.sh`](../scripts/configure-storage.sh)) writes a runtime fragment to `scripts/values/.storage-values.yaml` — that file is auto-generated and should not be hand-edited; it carries the workflow credential references for the backend you selected (`minio` / `azure-blob` / `s3` / `gcs` / `byo`).
 
