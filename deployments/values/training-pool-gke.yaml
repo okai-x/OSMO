@@ -1,0 +1,52 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# GKE scheduling isolation between the platform `cpu` pool and the CPU training
+# pool created by deployments/terraform/gcp/example (training_node_pool_enabled).
+# Pass it explicitly with --helm-values so it layers onto both the service and
+# backend-operator charts; the backend-operator chart ignores the keys it does
+# not know.
+#
+# Two mechanisms:
+#   1. Platform components pin to the untainted `cpu` pool. The training pool's
+#      osmo-workload=training:NoSchedule taint already keeps them off it; the
+#      selectors are a second guard that makes placement explicit.
+#   2. The default pool's `default` platform gains the `training_cpu` pod
+#      template. OSMO matches nodes to a platform through the template's
+#      nodeSelector labels plus its tolerations against node taints
+#      (nodeAffinity is not considered), so only training-cpu nodes count
+#      toward the pool and platform nodes drop out of its capacity.
+
+# Read by every core Deployment and Job of both charts.
+global:
+  nodeSelector:
+    cloud.google.com/gke-nodepool: cpu
+
+# gateway and the migration Job do not read global.nodeSelector.
+gateway:
+  envoy:
+    nodeSelector:
+      cloud.google.com/gke-nodepool: cpu
+
+services:
+  migration:
+    nodeSelector:
+      cloud.google.com/gke-nodepool: cpu
+  configs:
+    enabled: true
+    podTemplates:
+      training_cpu:
+        spec:
+          nodeSelector:
+            cloud.google.com/gke-nodepool: training-cpu
+          tolerations:
+            - key: osmo-workload
+              operator: Equal
+              value: training
+              effect: NoSchedule
+    pools:
+      default:
+        platforms:
+          default:
+            override_pod_template:
+              - training_cpu

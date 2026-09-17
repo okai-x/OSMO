@@ -471,3 +471,27 @@ if helm template mcp-bad-url "$CHART_DIR" --values "$mcp_values" \
     echo 'MCP accepted a malformed resourceUrl' >&2
     exit 1
 fi
+
+# values/training-pool-gke.yaml pins platform components to the GKE cpu pool
+# and routes default-pool workflows to the tainted training-cpu pool. The pool
+# matcher reads nodeSelector and tolerations, so both must reach the ConfigMap.
+training_values="$CHART_DIR/../../values/training-pool-gke.yaml"
+training_render=$(helm template training-test "$CHART_DIR" --namespace osmo \
+    --values "$training_values" --set services.migration.enabled=true)
+for resource in Deployment/osmo-service Deployment/osmo-worker \
+        Deployment/osmo-gateway-envoy Job/pgroll-migrate-1; do
+    training_document=$(resource_document "$training_render" "${resource%%/*}" "${resource##*/}")
+    if ! grep -q 'cloud.google.com/gke-nodepool: cpu' <<<"$training_document"; then
+        echo "$resource is not pinned to the cpu pool" >&2
+        exit 1
+    fi
+done
+training_configs=$(resource_document "$training_render" ConfigMap osmo-service-configs)
+grep -A3 '^      training_cpu:$' <<<"$training_configs" | grep -q 'cloud.google.com/gke-nodepool: training-cpu'
+grep -A8 '^      training_cpu:$' <<<"$training_configs" | grep -q 'key: osmo-workload'
+grep -A2 '^          default:$' <<<"$training_configs" | grep -q -- '- training_cpu'
+# The same file layers onto the backend-operator chart through --helm-values.
+operator_render=$(helm template training-test "$CHART_DIR/../backend-operator" \
+    --namespace osmo-operator --values "$training_values")
+operator_listener=$(resource_document "$operator_render" Deployment training-test-osmo-backend-listener)
+grep -q 'cloud.google.com/gke-nodepool: "cpu"' <<<"$operator_listener"
