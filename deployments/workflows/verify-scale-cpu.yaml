@@ -23,6 +23,10 @@ workflow:
       storage: 1Gi
   groups:
   - name: pair
+    # A group is torn down as soon as its lead finishes, so the lead outlives
+    # the peer to let the peer report its own exit code, and a peer failure
+    # fails the group instead of being ignored. Both exit codes are pass criteria.
+    ignoreNonleadStatus: false
     tasks:
     - name: lead
       image: alpine:3.20
@@ -33,7 +37,7 @@ workflow:
       - |
         set -e
         echo "lead started on $(hostname) at $(date -u +%FT%TZ)"
-        sleep 30
+        sleep 45
     - name: peer
       image: alpine:3.20
       resource: tiny
@@ -42,4 +46,4 @@ workflow:
       - |
         set -e
         echo "peer started on $(hostname) at $(date -u +%FT%TZ)"
-        sleep 30
+        sleep 15
