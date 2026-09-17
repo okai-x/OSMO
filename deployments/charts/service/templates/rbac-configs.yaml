@@ -29,14 +29,12 @@ rules:
 - apiGroups: [""]
   resources: ["events"]
   verbs: ["create", "get", "patch"]
-# Read the osmo-configs ConfigMap to fetch its UID. `kubectl describe
-# configmap` filters associated events by involvedObject.uid, so without
-# this the events wouldn't appear in that view (though they'd still be
-# visible in `kubectl get events --field-selector` and the ArgoCD UI).
+# Read the ConfigMap UID for events and persist the non-secret backend
+# reconciliation checkpoint required at startup in 6.4.
 - apiGroups: [""]
   resources: ["configmaps"]
   resourceNames: ["{{ .Values.services.service.serviceName }}-configs"]
-  verbs: ["get"]
+  verbs: ["get", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

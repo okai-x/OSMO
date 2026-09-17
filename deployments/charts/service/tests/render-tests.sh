@@ -63,6 +63,16 @@ if grep -q 'backend_token_bootstrap' <<<"$existing_render"; then
 fi
 grep -q 'secretName: "existing-token"' <<<"$existing_render"
 
+# The 6.4 loader requires these sections even when no entries are configured.
+config_render=$(helm template config-test "$CHART_DIR" --namespace osmo \
+    --set services.configs.enabled=true)
+config_document=$(resource_document "$config_render" ConfigMap osmo-service-configs)
+grep -A1 '^    backend_tests:$' <<<"$config_document" | grep -q '^      {}$'
+grep -A1 '^    group_templates:$' <<<"$config_document" | grep -q '^      {}$'
+config_role=$(resource_document "$config_render" Role osmo-service-configmap-events)
+grep -A2 'resources: \["configmaps"\]' <<<"$config_role" | grep -q 'verbs: \["get", "patch"\]'
+grep -q 'resourceNames: \["osmo-service-configs"\]' <<<"$config_role"
+
 legacy_render=$(helm template legacy-test "$CHART_DIR" "${helm_args[@]}" \
     --set 'services.backendApiTokens.credentials[0].name=default' \
     --set 'services.backendApiTokens.credentials[0].secretName=legacy-token')

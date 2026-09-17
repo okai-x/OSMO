@@ -1001,7 +1001,7 @@ main() {
 
     # ── Phase: cluster bootstrap ──────────────────────────────────────────────
     case "$PROVIDER" in
-        azure|aws)
+        azure|aws|gcp)
             if [[ "$SKIP_TERRAFORM" == false ]]; then
                 handle_configuration
                 run_terraform_init

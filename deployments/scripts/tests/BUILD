@@ -9,6 +9,7 @@ sh_test(
     srcs = ["test_gcp_terraform_driver.sh"],
     data = [
         "//deployments:scripts/common.sh",
+        "//deployments:scripts/deploy-osmo-minimal.sh",
         "//deployments:scripts/gcp/terraform.sh",
     ],
 )
