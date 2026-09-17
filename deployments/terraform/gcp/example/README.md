@@ -98,3 +98,13 @@ bazel test //deployments/scripts/tests:test_gcp_terraform_driver
 
 Validation checks syntax and schema only. Runtime acceptance is a successful
 `deploy-osmo-minimal.sh --provider gcp` run including its smoke workflows.
+
+## Public access through Cloudflare
+
+The cluster has no public ingress. `deployments/manifests/cloudflared-tunnel-gke.yaml`
+runs a Cloudflare Tunnel connector on the `cpu` pool that forwards edge traffic
+to the `osmo-gateway` Service, which fronts the UI, the API and the router
+WebSockets on one port. The tunnel, its ingress rule, the Access policy and DNS
+are managed outside this repository; the connector only needs the run token in
+the Secret `cloudflared-tunnel-token`. Point `services.configs.service.service_base_url`
+at the public hostname so generated links resolve from outside the cluster.
