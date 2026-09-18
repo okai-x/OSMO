@@ -99,6 +99,19 @@ bazel test //deployments/scripts/tests:test_gcp_terraform_driver
 Validation checks syntax and schema only. Runtime acceptance is a successful
 `deploy-osmo-minimal.sh --provider gcp` run including its smoke workflows.
 
+## Training pool scale test
+
+With `training_node_pool_enabled = true` and
+`deployments/values/training-pool-gke.yaml` layered onto both charts,
+`deployments/workflows/verify-scale-cpu.yaml` checks the autoscaling chain:
+two gang-scheduled tasks whose pods together exceed one `e2-standard-4` node
+stay pending until the cluster autoscaler adds a second training node, then
+run and exit 0. Submit it with `osmo workflow submit`, then confirm the tasks
+landed on two different `training-cpu` nodes, a `TriggeredScaleUp` event named
+the pool, and the pool returned to `training_node_pool_min_size` nodes about
+ten minutes after the workflow finished. Adding nodes by hand does not count as
+a pass.
+
 ## Public access through Cloudflare
 
 The cluster has no public ingress. `deployments/manifests/cloudflared-tunnel-gke.yaml`
