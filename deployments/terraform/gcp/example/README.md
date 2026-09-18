@@ -111,3 +111,13 @@ landed on two different `training-cpu` nodes, a `TriggeredScaleUp` event named
 the pool, and the pool returned to `training_node_pool_min_size` nodes about
 ten minutes after the workflow finished. Adding nodes by hand does not count as
 a pass.
+
+## Public access through Cloudflare
+
+The cluster has no public ingress. `deployments/manifests/cloudflared-tunnel-gke.yaml`
+runs a Cloudflare Tunnel connector on the `cpu` pool that forwards edge traffic
+to the `osmo-gateway` Service, which fronts the UI, the API and the router
+WebSockets on one port. The tunnel, its ingress rule, the Access policy and DNS
+are managed outside this repository; the connector only needs the run token in
+the Secret `cloudflared-tunnel-token`. Point `services.configs.service.service_base_url`
+at the public hostname so generated links resolve from outside the cluster.
