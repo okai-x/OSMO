@@ -849,9 +849,8 @@ class CloudflareLoginTests(unittest.TestCase):
     """Access login persists only the origin; cloudflared owns the credentials."""
 
     def setUp(self):
-        directory = tempfile.TemporaryDirectory()
-        self.addCleanup(directory.cleanup)
-        self.directory = directory.name
+        self.directory = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.directory)
         patch = mock.patch.dict(os.environ, {common.OSMO_CONFIG_OVERRIDE: self.directory})
         patch.start()
         self.addCleanup(patch.stop)
