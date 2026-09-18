@@ -50,6 +50,9 @@ spec:
         runAsNonRoot: true
         runAsUser: 65532
         runAsGroup: 65532
+        # Secret volume files are root-owned; fsGroup gives the cloudflared
+        # group read access to the token without making it world-readable.
+        fsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -100,4 +103,4 @@ spec:
         - name: token
           secret:
             secretName: cloudflared-tunnel-token
-            defaultMode: 0400
+            defaultMode: 0440
