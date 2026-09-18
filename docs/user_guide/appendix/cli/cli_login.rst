@@ -32,7 +32,7 @@ osmo login
    :argument-anchor:
 
 Cloudflare Access gateways
--------------------------
+--------------------------
 
 For a converged gateway protected by Cloudflare Access that supplies the OSMO
 identity, use the optional ``cloudflare`` login method. ``cloudflared`` must be
