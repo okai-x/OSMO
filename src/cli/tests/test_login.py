@@ -34,6 +34,16 @@ from src.lib.utils import login as login_utils
 class LoginCommandTests(unittest.TestCase):
     """Tests for CLI login flow selection."""
 
+    def test_cloudflare_method_uses_access_login(self):
+        arguments = main_parser.create_cli_parser().parse_args([
+            'login', 'https://osmo.example.com', '--method', 'cloudflare',
+        ])
+        service_client = mock.MagicMock()
+        login._login(service_client, arguments)
+        service_client.login_manager.cloudflare_login.assert_called_once_with(
+            'https://osmo.example.com')
+        service_client.login_manager.pkce_login.assert_not_called()
+
     def test_bootstrap_token_file_login_without_identity_provider(self):
         """The default-admin Secret is an OSMO token, not an OAuth password."""
         bootstrap_token = 'a' * 43

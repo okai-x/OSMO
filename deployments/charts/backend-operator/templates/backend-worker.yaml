@@ -16,6 +16,7 @@
 {{- if .Values.global.enableNonClusterRoles }}
 
 {{$name := or .Values.global.name .Release.Name }}
+{{$livenessProbe := .Values.services.backendWorker.livenessProbe | default dict }}
 
 apiVersion: apps/v1
 kind: Deployment
@@ -158,9 +159,9 @@ spec:
             - "300:300"
             - --progress_file
             - /var/run/osmo/last_progress_worker_job:/var/run/osmo/last_progress_worker_heartbeat
-          failureThreshold: 1
-          periodSeconds: 30
-          timeoutSeconds: 15
+          failureThreshold: {{ $livenessProbe.failureThreshold | default 1 }}
+          periodSeconds: {{ $livenessProbe.periodSeconds | default 30 }}
+          timeoutSeconds: {{ $livenessProbe.timeoutSeconds | default 15 }}
         # Give the container 60 seconds to startup
         startupProbe:
           exec:

@@ -17,11 +17,12 @@
 # deploy guide which keeps `gateway.oauth2Proxy.enabled` and
 # `gateway.authz.enabled` at their chart defaults (true).
 
-# `global: {}` (not `global:` alone) — a key with only comments parses as null,
-# which makes `helm --set global.foo=bar` fail with
-# "interface conversion: interface {} is nil, not map[string]interface {}".
 # osmoImageLocation / osmoImageTag / imagePullSecret are injected via --set.
-global: {}
+# The chart default log level is DEBUG, which logs every WebSocket keepalive
+# in the agent; INFO keeps request, reconnect and error lines.
+global:
+  logs:
+    logLevel: INFO
 
 services:
   configFile:
@@ -137,12 +138,22 @@ services:
   # bootstrap and harmless on fast clusters (probe stops once a request
   # succeeds — extra failureThreshold has no overhead unless the service is
   # actually broken).
+  # Requests below are sized from a live CPU-only deployment at idle (service
+  # ~500Mi, worker ~540Mi, router ~150Mi, monitor ~150Mi, UI ~100Mi) with
+  # headroom. The chart ships these five with no requests at all, so the
+  # scheduler reserves nothing for them and the HPAs cannot compute a target.
   service:
     scaling:
       minReplicas: 1
       maxReplicas: 1
     startupProbe:
       failureThreshold: 30
+    resources:
+      requests:
+        cpu: 250m
+        memory: 768Mi
+      limits:
+        memory: 1536Mi
 
   router:
     scaling:
@@ -150,6 +161,12 @@ services:
       maxReplicas: 1
     startupProbe:
       failureThreshold: 30
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 512Mi
 
   agent:
     scaling:
@@ -164,6 +181,12 @@ services:
       maxReplicas: 1
     startupProbe:
       failureThreshold: 30
+    resources:
+      requests:
+        cpu: 250m
+        memory: 768Mi
+      limits:
+        memory: 1536Mi
 
   logger:
     scaling:
@@ -175,10 +198,22 @@ services:
   delayedJobMonitor:
     startupProbe:
       failureThreshold: 30
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 512Mi
 
   ui:
     enabled: true
     # apiHostname is injected via --set so the namespace can vary.
+    resources:
+      requests:
+        cpu: 100m
+        memory: 192Mi
+      limits:
+        memory: 512Mi
 
   defaultAdmin:
     enabled: true

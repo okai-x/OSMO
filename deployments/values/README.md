@@ -11,6 +11,18 @@ The deploy script orchestrates `helm install` — these YAML files hold the valu
 
 To customize defaults beyond what `--set` covers, edit these files directly.
 
+The minimal values use `INFO` application logging and reserve CPU and memory
+for the control-plane services. Size requests and limits for your workload;
+these defaults are a starting point for small deployments. The backend listener
+allows 30 seconds per liveness check and requires three consecutive failures
+before restarting. The chart exposes these settings under
+`services.backendListener.livenessProbe` and `services.backendWorker.livenessProbe`;
+without the minimal values, the historical probe settings remain unchanged.
+
+When updating an existing deployment, layer only the settings being changed
+onto its retained values. Applying this entire base file last can overwrite
+cluster-specific settings such as Redis TLS and workflow pod templates.
+
 ## Files
 
 | File | Loaded when | Purpose |

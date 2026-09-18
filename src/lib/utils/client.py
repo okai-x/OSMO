@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import ssl
+import subprocess
 import sys
 import time
 from typing import Dict, List, Optional, cast
@@ -36,6 +37,7 @@ import requests
 import urllib3
 import websockets
 import websockets.client
+import websockets.legacy.client
 import yaml
 
 from . import client_configs, login, osmo_errors, version
@@ -43,6 +45,14 @@ from . import client_configs, login, osmo_errors, version
 CLIENT_USER_AGENT_PREFIX = 'osmo-cli'
 LIB_USER_AGENT_PREFIX = 'osmo-lib'
 PKCE_CALLBACK_TIMEOUT_SECONDS = 300
+
+
+class _AccessWebSocketConnect(websockets.legacy.client.Connect):
+    """Never forward an Access credential through a WebSocket redirect."""
+
+    def handle_redirect(self, uri: str) -> None:
+        raise osmo_errors.OSMOUserError(
+            'Cloudflare Access WebSocket redirected; re-login with --method cloudflare')
 
 
 @dataclasses.dataclass
@@ -214,6 +224,7 @@ class LoginManager():
 
     def __init__(self, config: login.LoginConfig, user_agent_prefix: str):
         self._login_config = config
+        self._cloudflare_token: login.Jwt | None = None
         self.user_agent = f'{user_agent_prefix}/{version.VERSION}'
 
         # Do not allow IPV6 which doesn't work in some of our configurations
@@ -398,6 +409,56 @@ class LoginManager():
         self._login_storage = login.dev_login(url, username)
         self._save_login_info(self._login_storage, welcome=True)
 
+    def cloudflare_login(self, url: str):
+        """Delegate personal Access authentication and credential storage to cloudflared."""
+        storage = login.LoginStorage(url=url, cloudflare_login=True)
+        try:
+            result = subprocess.run(
+                ['cloudflared', 'access', 'login', '--quiet', storage.url],
+                check=False, timeout=PKCE_CALLBACK_TIMEOUT_SECONDS)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise osmo_errors.OSMOUserError(
+                'Cloudflare login failed. Ensure cloudflared is available and retry.') from error
+        if result.returncode != 0:
+            raise osmo_errors.OSMOUserError('Cloudflare login failed; please retry.')
+        # Confirm Access and the OSMO API before replacing a working login.
+        token = self._read_cloudflare_token(storage.url)
+        response = requests.get(
+            f'{storage.url}/api/version', headers={
+                'cf-access-token': token.token, 'User-Agent': self.user_agent,
+            }, timeout=login.TIMEOUT, allow_redirects=False)
+        if response.status_code != 200:
+            raise osmo_errors.OSMOUserError(
+                f'Cloudflare OSMO login failed (HTTP {response.status_code}).')
+        version_info = response.json()
+        if not isinstance(version_info, dict) or 'major' not in version_info:
+            raise osmo_errors.OSMOUserError('The endpoint did not return an OSMO version.')
+        self._login_storage = storage
+        self._cloudflare_token = token
+        self._save_login_info(storage, welcome=True)
+
+    def _read_cloudflare_token(self, url: str) -> login.Jwt:
+        try:
+            result = subprocess.run(
+                ['cloudflared', 'access', 'token', '--app', url],
+                capture_output=True, text=True, check=False, timeout=login.TIMEOUT)
+            if result.returncode != 0:
+                raise ValueError('No cached Access token')
+            token = login.Jwt(result.stdout.strip())
+            if token.expired or '\n' in token.token or '\r' in token.token:
+                raise ValueError('Invalid or expired Access token')
+            return token
+        except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, TypeError) as error:
+            raise osmo_errors.OSMOUserError(
+                'Cloudflare session unavailable or expired. Run '
+                '"osmo login <https-url> --method cloudflare" again.') from error
+
+    def cloudflare_headers(self) -> Dict[str, str]:
+        """Read the cached application token without opening a browser during requests."""
+        if self._cloudflare_token is None or self._cloudflare_token.expired:
+            self._cloudflare_token = self._read_cloudflare_token(self.url)
+        return {'cf-access-token': self._cloudflare_token.token}
+
     def token_login(self, url: str, refresh_url: str, refresh_token: str):
         self._login_storage = login.token_login(url, refresh_url, refresh_token, self.user_agent)
         self._save_login_info(self._login_storage, welcome=True)
@@ -506,6 +567,9 @@ class ServiceClient():
 
         # Enable streaming for chunked transfer encoding
         extra_args = {}
+        if self._login_manager.login_storage.cloudflare_login is True:
+            headers.update(self._login_manager.cloudflare_headers())
+            extra_args['allow_redirects'] = False
         timeout: Optional[int] = login.TIMEOUT
         if mode == ResponseMode.STREAMING:
             extra_args['stream'] = True
@@ -574,6 +638,10 @@ class ServiceClient():
             case _ as unreachable:
                 assert_never(unreachable)
 
+        if self._login_manager.login_storage.cloudflare_login is True and \
+                300 <= response.status_code < 400:
+            raise osmo_errors.OSMOUserError(
+                'Cloudflare Access redirected the request; re-login with --method cloudflare')
         resp = handle_response(response, mode)
         return resp
 
@@ -583,6 +651,11 @@ class ServiceClient():
         ) -> websockets.WebSocketClientProtocol: # type: ignore
         # Make sure the tokens are up to date
         self._login_manager.refresh_id_token()
+
+        access_login = self._login_manager.login_storage.cloudflare_login is True
+        if access_login:
+            # Converged gateways expose the router on the same public origin.
+            address = self._login_manager.url.replace('https://', 'wss://', 1)
 
         query_string = ''
         if params is not None:
@@ -601,9 +674,14 @@ class ServiceClient():
         headers[version.VERSION_HEADER] = str(version.VERSION)
         headers['User-Agent'] = self._user_agent
 
+        connect = websockets.client.connect
+        if access_login:
+            headers.update(self._login_manager.cloudflare_headers())
+            connect = _AccessWebSocketConnect
+
         ssl_context = None
         if url.startswith('wss'):
             ssl_context = ssl.create_default_context(cafile=certifi.where())
-        client_websocket = await websockets.client.connect(
+        client_websocket = await connect(
             url, extra_headers=headers, open_timeout=timeout, ssl=ssl_context)
         return client_websocket

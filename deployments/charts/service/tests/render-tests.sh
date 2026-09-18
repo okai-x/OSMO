@@ -495,3 +495,59 @@ operator_render=$(helm template training-test "$CHART_DIR/../backend-operator" \
     --namespace osmo-operator --values "$training_values")
 operator_listener=$(resource_document "$operator_render" Deployment training-test-osmo-backend-listener)
 grep -q 'cloud.google.com/gke-nodepool: "cpu"' <<<"$operator_listener"
+
+# values/service.yaml and values/backend-operator.yaml (the minimal deployment
+# defaults) lower the log level to INFO and give every control-plane
+# Deployment a resource request; the backend listener gets a tolerant
+# liveness probe through the new chart knobs.
+minimal_service_render=$(helm template minimal-test "$CHART_DIR" --namespace osmo \
+    --values "$CHART_DIR/../../values/service.yaml")
+for expected in osmo-service:250m:768Mi osmo-router:100m:256Mi \
+        osmo-worker:250m:768Mi osmo-ui:100m:192Mi osmo-delayed-job-monitor:100m:256Mi; do
+    IFS=: read -r name cpu memory <<<"$expected"
+    minimal_document=$(resource_document "$minimal_service_render" Deployment "$name")
+    grep -A2 'requests:' <<<"$minimal_document" | grep -q "cpu: $cpu$"
+    grep -A2 'requests:' <<<"$minimal_document" | grep -q "memory: $memory$"
+done
+for name in osmo-service osmo-router osmo-worker osmo-delayed-job-monitor osmo-agent osmo-logger; do
+    minimal_document=$(resource_document "$minimal_service_render" Deployment "$name")
+    grep -A1 -- '- --log_level$' <<<"$minimal_document" | grep -q -- '- INFO$'
+done
+minimal_operator_render=$(helm template minimal-test "$CHART_DIR/../backend-operator" \
+    --namespace osmo-operator --values "$CHART_DIR/../../values/backend-operator.yaml")
+minimal_listener=$(resource_document "$minimal_operator_render" Deployment minimal-test-osmo-backend-listener)
+grep -A1 -- '- --log_level$' <<<"$minimal_listener" | grep -q -- '- INFO$'
+grep -A12 'livenessProbe:' <<<"$minimal_listener" | grep -q 'timeoutSeconds: 30'
+grep -A12 'livenessProbe:' <<<"$minimal_listener" | grep -q 'failureThreshold: 3'
+minimal_worker=$(resource_document "$minimal_operator_render" Deployment minimal-test-osmo-backend-worker)
+grep -A1 -- '- --log_level$' <<<"$minimal_worker" | grep -q -- '- INFO$'
+# Chart defaults are unchanged for deployments that do not opt in.
+default_operator_render=$(helm template default-test "$CHART_DIR/../backend-operator" --namespace osmo-operator)
+for name in backend-listener backend-worker; do
+    default_document=$(resource_document "$default_operator_render" Deployment "default-test-osmo-$name")
+    grep -A12 'livenessProbe:' <<<"$default_document" | grep -q 'failureThreshold: 1'
+    grep -A12 'livenessProbe:' <<<"$default_document" | grep -q 'periodSeconds: 30'
+    grep -A12 'livenessProbe:' <<<"$default_document" | grep -q 'timeoutSeconds: 15'
+done
+# Old releases used hard-coded probes, so --reuse-values may omit these maps.
+legacy_operator_render=$(helm template default-test "$CHART_DIR/../backend-operator" --namespace osmo-operator \
+    --set services.backendListener.livenessProbe=null \
+    --set services.backendWorker.livenessProbe=null)
+if [[ "$legacy_operator_render" != "$default_operator_render" ]]; then
+    echo 'Missing liveness values changed the historical probe defaults' >&2
+    exit 1
+fi
+custom_operator_render=$(helm template custom-test "$CHART_DIR/../backend-operator" --namespace osmo-operator \
+    --set services.backendListener.livenessProbe.failureThreshold=4 \
+    --set services.backendListener.livenessProbe.periodSeconds=40 \
+    --set services.backendListener.livenessProbe.timeoutSeconds=25 \
+    --set services.backendWorker.livenessProbe.failureThreshold=5 \
+    --set services.backendWorker.livenessProbe.periodSeconds=45 \
+    --set services.backendWorker.livenessProbe.timeoutSeconds=20)
+for expected in backend-listener:4:40:25 backend-worker:5:45:20; do
+    IFS=: read -r name failures period timeout <<<"$expected"
+    custom_document=$(resource_document "$custom_operator_render" Deployment "custom-test-osmo-$name")
+    grep -A12 'livenessProbe:' <<<"$custom_document" | grep -q "failureThreshold: $failures$"
+    grep -A12 'livenessProbe:' <<<"$custom_document" | grep -q "periodSeconds: $period$"
+    grep -A12 'livenessProbe:' <<<"$custom_document" | grep -q "timeoutSeconds: $timeout$"
+done

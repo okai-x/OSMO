@@ -54,7 +54,8 @@ def _cookie_to_header_string(cookie):
     return '; '.join(cookie_parts)
 
 
-def _get_session_cookie(url: str, timeout: int) -> str:
+def _get_session_cookie(url: str, timeout: int,
+                        service_client: client.ServiceClient | None = None) -> str:
     """ Gets router session cookies. """
     parsed_url = urllib.parse.urlparse(url)
     if parsed_url.scheme == 'wss':
@@ -64,7 +65,19 @@ def _get_session_cookie(url: str, timeout: int) -> str:
     else:
         raise osmo_errors.OSMOServerError(f'Invalid router address: {url}')
     url = urllib.parse.urlunparse(parsed_url)
-    res = requests.get(f'{url}/api/router/version', timeout=timeout)
+    if service_client is not None and \
+            service_client.login_manager.login_storage.cloudflare_login is True:
+        # The public gateway owns router routing and Access authentication.
+        res = requests.get(
+            f'{service_client.login_manager.url}/api/router/version',
+            headers={**service_client.login_manager.cloudflare_headers(),
+                     'User-Agent': service_client.login_manager.user_agent},
+            timeout=timeout, allow_redirects=False)
+        if res.status_code != 200:
+            raise osmo_errors.OSMOUserError(
+                f'Unable to get public router session (HTTP {res.status_code}).')
+    else:
+        res = requests.get(f'{url}/api/router/version', timeout=timeout)
 
     # Convert cookies manualy rather than using 'set-cookie' to solve duplicate cookie names
     # for virtual node with ssh port-forwarding
@@ -176,7 +189,7 @@ async def run_tcp_with_sock(
             logger.debug('Handle new client connection for port %d', app_port)
             try:
                 conn_key = f'PORTFORWARD-{common.generate_unique_id()}'
-                cookie = _get_session_cookie(router_address, timeout)
+                cookie = _get_session_cookie(router_address, timeout, service_client)
                 payload = {'key': conn_key, 'cookie': cookie}
                 await ctrl_ws.send(json.dumps(payload).encode())
             except (requests.exceptions.ConnectionError,

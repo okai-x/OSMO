@@ -102,7 +102,8 @@ class WorkflowServiceTestCase(
                 service_auth_file=cls.service_auth_file.name,
             ),
         )
-        cls.client = testclient.TestClient(service.app)
+        # Keep concurrent requests on one ASGI event loop, as in the deployed service.
+        cls.client = cls.enterClassContext(testclient.TestClient(service.app))
 
         # Create a test image
         cls.registry_container.create_image(cls.TEST_IMAGE_NAME)
