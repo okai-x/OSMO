@@ -196,6 +196,7 @@ class LoginStorage(pydantic.BaseModel):
     """Stores information needed to login and reach out to server"""
     token_login: TokenLoginStorage | None = None
     dev_login: DevLoginStorage | None = None
+    cloudflare_login: bool = False
     url: str
     osmo_token: bool = False
 
@@ -211,6 +212,13 @@ class LoginStorage(pydantic.BaseModel):
             return values
         fields = ('token_login', 'dev_login')
         login_fields = [field for field in fields if values.get(field) is not None]
+        if values.get('cloudflare_login'):
+            login_fields.append('cloudflare_login')
+            endpoint = urlparse(values.get('url', ''))
+            if (endpoint.scheme != 'https' or not endpoint.hostname or endpoint.username or
+                    endpoint.password or endpoint.path not in ('', '/') or
+                    endpoint.query or endpoint.fragment):
+                raise ValueError('Cloudflare Access requires an HTTPS origin without a path')
         if len(login_fields) != 1:
             raise ValueError(f'Invalid login info, must contain exactly one of {fields}')
         return values
@@ -222,6 +230,8 @@ class LoginStorage(pydantic.BaseModel):
             return self.token_login.id_token_jwt.claims['name']
         elif self.dev_login is not None:
             return self.dev_login.username
+        elif self.cloudflare_login:
+            return 'Cloudflare Access user'
         else:
             return ''
 

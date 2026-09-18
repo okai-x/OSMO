@@ -517,6 +517,25 @@ class TestCookieToHeaderString(unittest.TestCase):
 class TestGetSessionCookie(unittest.TestCase):
     """Tests for _get_session_cookie scheme handling."""
 
+    def test_access_router_cookie_uses_public_authenticated_origin(self):
+        service = mock.Mock()
+        service.login_manager.login_storage.cloudflare_login = True
+        service.login_manager.url = 'https://osmo.example.com'
+        service.login_manager.user_agent = 'osmo-cli/test'
+        service.login_manager.cloudflare_headers.return_value = {'cf-access-token': 'token'}
+        response = mock.Mock(status_code=200, cookies=[_FakeCookie(name='sticky', value='1')])
+        with mock.patch.object(port_forward.requests, 'get', return_value=response) as get:
+            result = port_forward._get_session_cookie('ws://router.internal', 5, service)
+        self.assertIn('sticky=1', result)
+        get.assert_called_once_with('https://osmo.example.com/api/router/version',
+                                    headers={'cf-access-token': 'token',
+                                             'User-Agent': 'osmo-cli/test'},
+                                    timeout=5, allow_redirects=False)
+        response.status_code = 302
+        with mock.patch.object(port_forward.requests, 'get', return_value=response):
+            with self.assertRaisesRegex(osmo_errors.OSMOUserError, '302'):
+                port_forward._get_session_cookie('ws://router.internal', 5, service)
+
     def test_invalid_scheme_raises_osmo_server_error(self):
         with self.assertRaises(osmo_errors.OSMOServerError):
             port_forward._get_session_cookie('http://router.example', timeout=1)

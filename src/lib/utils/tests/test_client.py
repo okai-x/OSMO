@@ -827,9 +827,121 @@ class ServiceClientRequestTests(unittest.TestCase):
 
         self.manager.refresh_id_token.assert_called_once()
 
+    def test_cloudflare_requests_use_access_header_and_do_not_follow_redirects(self):
+        self.manager.login_storage = login.LoginStorage(
+            url=self.manager.url, cloudflare_login=True)
+        self.manager.cloudflare_headers.return_value = {'cf-access-token': 'access-token'}
+        for method in client.RequestMethod:
+            with self.subTest(method=method):
+                self._wire(method.value.lower())
+                self.service.request(method, 'api/workflow')
+                kwargs = getattr(self.session, method.value.lower()).call_args.kwargs
+                self.assertEqual(kwargs['headers']['cf-access-token'], 'access-token')
+                self.assertNotIn('x-osmo-user', kwargs['headers'])
+                self.assertNotIn('Authorization', kwargs['headers'])
+                self.assertFalse(kwargs['allow_redirects'])
+        self.response.status_code = 302
+        with self.assertRaisesRegex(osmo_errors.OSMOUserError, 'redirected'):
+            self.service.request(client.RequestMethod.GET, 'api/workflow')
+
+
+class CloudflareLoginTests(unittest.TestCase):
+    """Access login persists only the origin; cloudflared owns the credentials."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.directory = directory.name
+        patch = mock.patch.dict(os.environ, {common.OSMO_CONFIG_OVERRIDE: self.directory})
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.manager = client.LoginManager(login.LoginConfig(), 'osmo-cli/test')
+        self.token = _make_jwt({'exp': 9_999_999_999})
+
+    def test_login_and_reload_never_store_access_token(self):
+        response = mock.Mock(status_code=200)
+        response.json.return_value = {'major': '6'}
+        with mock.patch.object(client.subprocess, 'run', side_effect=[
+            mock.Mock(returncode=0), mock.Mock(returncode=0, stdout=self.token),
+        ]) as run, mock.patch.object(client.requests, 'get', return_value=response) as get:
+            self.manager.cloudflare_login('https://osmo.example.com')
+        self.assertEqual(run.call_args_list[0].args[0], [
+            'cloudflared', 'access', 'login', '--quiet', 'https://osmo.example.com'])
+        self.assertFalse(get.call_args.kwargs['allow_redirects'])
+        self.assertEqual(get.call_args.kwargs['headers']['cf-access-token'], self.token)
+        with open(os.path.join(self.directory, 'login.yaml'), encoding='utf-8') as file:
+            saved = file.read()
+        self.assertNotIn(self.token, saved)
+        restored = client.LoginManager(login.LoginConfig(), 'osmo-cli/test')
+        self.assertTrue(restored.login_storage.cloudflare_login)
+        self.assertIsNone(restored.login_storage.dev_login)
+        with mock.patch.object(client.subprocess, 'run', return_value=mock.Mock(
+                returncode=0, stdout=self.token)) as run:
+            self.assertEqual(restored.cloudflare_headers(), {'cf-access-token': self.token})
+            restored.cloudflare_headers()
+        run.assert_called_once()
+        self.assertEqual(run.call_args.args[0], [
+            'cloudflared', 'access', 'token', '--app', 'https://osmo.example.com'])
+
+    def test_failed_login_preserves_previous_login(self):
+        self.manager.dev_login('http://localhost:8000', 'admin')
+        with mock.patch.object(client.subprocess, 'run', side_effect=[
+            mock.Mock(returncode=0), mock.Mock(returncode=0, stdout=self.token),
+        ]), mock.patch.object(client.requests, 'get', return_value=mock.Mock(status_code=403)):
+            with self.assertRaisesRegex(osmo_errors.OSMOUserError, '403'):
+                self.manager.cloudflare_login('https://osmo.example.com')
+        self.assertEqual(self.manager.url, 'http://localhost:8000')
+        restored = client.LoginManager(login.LoginConfig(), 'osmo-cli/test')
+        self.assertEqual(restored.url, self.manager.url)
+
+    def test_invalid_expired_or_missing_tokens_do_not_start_login_or_leak_output(self):
+        self.manager._login_storage = login.LoginStorage(  # pylint: disable=protected-access
+            url='https://osmo.example.com', cloudflare_login=True)
+        for result in [mock.Mock(returncode=1, stdout='secret'),
+                       mock.Mock(returncode=0, stdout='invalid-secret'),
+                       mock.Mock(returncode=0, stdout=_make_jwt({'exp': 1}))]:
+            with self.subTest(result=result), \
+                    mock.patch.object(client.subprocess, 'run', return_value=result) as run:
+                with self.assertRaisesRegex(osmo_errors.OSMOUserError, 'expired') as error:
+                    self.manager.cloudflare_headers()
+                self.assertNotIn(result.stdout, str(error.exception))
+                self.assertEqual(run.call_args.args[0][2], 'token')
+
+    def test_access_login_rejects_insecure_or_ambiguous_origins(self):
+        for url in ['http://osmo.example.com', 'https://user:pass@osmo.example.com',
+                    'https://osmo.example.com/path', 'https://osmo.example.com?query=1',
+                    'https://osmo.example.com#fragment']:
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                login.LoginStorage(url=url, cloudflare_login=True)
+        with self.assertRaises(ValueError):
+            login.LoginStorage(url='https://osmo.example.com', cloudflare_login=True,
+                               dev_login=login.DevLoginStorage(username='admin'))
+
 
 class ServiceClientWebSocketTests(unittest.IsolatedAsyncioTestCase):
     """Tests for ServiceClient.create_websocket."""
+
+    async def test_access_websocket_uses_public_origin_and_preserves_router_cookie(self):
+        manager = mock.Mock(url='https://osmo.example.com', user_agent='osmo-cli/test')
+        manager.login_storage = login.LoginStorage(url=manager.url, cloudflare_login=True)
+        manager.cloudflare_headers.return_value = {'cf-access-token': 'access-token'}
+        service = client.ServiceClient(manager)
+        with mock.patch.object(client, '_AccessWebSocketConnect',
+                               new=mock.AsyncMock(return_value='WS')) as connect:
+            await service.create_websocket('ws://router.osmo.svc.cluster.local',
+                                           'api/router/exec/key', headers={'Cookie': 'sticky=1'})
+        self.assertEqual(connect.call_args.args[0],
+                         'wss://osmo.example.com/api/router/exec/key')
+        self.assertEqual(connect.call_args.kwargs['extra_headers']['Cookie'], 'sticky=1')
+        self.assertEqual(connect.call_args.kwargs['extra_headers']['cf-access-token'],
+                         'access-token')
+        self.assertIsNotNone(connect.call_args.kwargs['ssl'])
+
+    async def test_access_websocket_refuses_redirects(self):
+        connector = client._AccessWebSocketConnect(  # pylint: disable=protected-access
+            'wss://osmo.example.com/api/router/exec/key')
+        with self.assertRaisesRegex(osmo_errors.OSMOUserError, 'redirected'):
+            connector.handle_redirect('wss://attacker.example.com')
 
     async def test_create_websocket_with_token_login_sets_auth_header(self):
         manager = mock.MagicMock()

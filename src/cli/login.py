@@ -52,14 +52,16 @@ def setup_parser(parser: argparse._SubParsersAction):
                               help='Local callback port for PKCE login. The default chooses an '
                                    'available ephemeral port.')
     login_parser.add_argument('--method', default='pkce', type=str,
-                              choices=('pkce', 'code', 'password', 'token', 'dev'),
+                              choices=('pkce', 'code', 'password', 'token', 'dev', 'cloudflare'),
                               help='pkce: Log in through the system browser using authorization ' +
                                    'code flow with PKCE (default). ' +
                                    'code: Get a device code and url to log in securely ' +
                                    'through browser. ' +
                                    'password: Provide username and password directly ' +
                                    'through CLI. ' +
-                                   'token: Exchange an OSMO access token for a login token.')
+                                   'token: Exchange an OSMO access token for a login token. ' +
+                                   'cloudflare: Use cloudflared browser login for an Access ' +
+                                   'gateway that supplies the OSMO identity.')
     login_parser.add_argument('--username',
                               help='Username if logging in with credentials. This should ' +
                                    'only be used for service accounts that cannot ' +
@@ -106,8 +108,12 @@ def _login(service_client: client.ServiceClient, args: argparse.Namespace):
         with open(args.password_file, 'r', encoding='utf-8') as password_fh:
             password = password_fh.read().strip('\n')
 
+    # Login through the gateway's Cloudflare Access policy.
+    if args.method == 'cloudflare':
+        service_client.login_manager.cloudflare_login(url)
+
     # Login through device code flow
-    if args.method == 'code':
+    elif args.method == 'code':
         service_client.login_manager.device_code_login(url, args.device_endpoint)
 
     # Login through authorization code flow with PKCE
