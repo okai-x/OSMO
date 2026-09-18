@@ -346,6 +346,16 @@ services:
       timeoutSeconds: 60
       initialDelaySeconds: 10
 
+    ## Liveness probe tuning. progress_check is the same PyInstaller binary as
+    ## the startup probe; on a busy node its cold start alone can approach the
+    ## 15s timeout, and with failureThreshold 1 one slow exec restarts the
+    ## container. Defaults keep the historical behaviour.
+    ##
+    livenessProbe:
+      failureThreshold: 1
+      periodSeconds: 30
+      timeoutSeconds: 15
+
   ## Backend worker configuration
   ## Executes jobs received from the backend listener
   ##
@@ -467,6 +477,16 @@ services:
       periodSeconds: 5
       timeoutSeconds: 60
       initialDelaySeconds: 10
+
+    ## Liveness probe tuning. progress_check is the same PyInstaller binary as
+    ## the startup probe; on a busy node its cold start alone can approach the
+    ## 15s timeout, and with failureThreshold 1 one slow exec restarts the
+    ## container. Defaults keep the historical behaviour.
+    ##
+    livenessProbe:
+      failureThreshold: 1
+      periodSeconds: 30
+      timeoutSeconds: 15
 
 
 ## Backend Test Runner CronJob Configuration

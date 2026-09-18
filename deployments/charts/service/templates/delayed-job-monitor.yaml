@@ -128,7 +128,7 @@ spec:
               key: redis-password
         {{- end }}
         resources:
-        {{- toYaml .Values.services.service.resources | nindent 10 }}
+        {{- toYaml .Values.services.delayedJobMonitor.resources | nindent 10 }}
 
         volumeMounts:
         {{- include "osmo.mek-volume-mount" . | nindent 8 }}

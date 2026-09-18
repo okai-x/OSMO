@@ -19,24 +19,36 @@ global:
   backendName: default
   accountTokenSecret: osmo-operator-token
   loginMethod: token
+  # The chart default is DEBUG, which logs every WebSocket frame. INFO keeps
+  # connection, reconnect and node-update events.
+  logs:
+    logLevel: INFO
 
 services:
   backendListener:
+    # Sized from a live CPU-only cluster: the listener idles around 250m and
+    # 210Mi while watching nodes, pods and events.
     resources:
       requests:
-        cpu: "125m"
-        memory: "128Mi"
-      limits:
         cpu: "250m"
         memory: "256Mi"
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+    # progress_check on a drained or busy node has exceeded the 15s default and
+    # restarted the listener; require consecutive failures before restarting.
+    livenessProbe:
+      failureThreshold: 3
+      periodSeconds: 30
+      timeoutSeconds: 30
   backendWorker:
     resources:
       requests:
         cpu: "125m"
-        memory: "128Mi"
+        memory: "192Mi"
       limits:
         cpu: "250m"
-        memory: "256Mi"
+        memory: "384Mi"
 
 sidecars:
   otel:
