@@ -7,6 +7,8 @@ set -euo pipefail
 
 CHART_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
+python3 "$CHART_DIR/tests/test_trusted_backend.py"
+
 resource_document() {
     local rendered=$1
     local kind=$2

@@ -63,6 +63,20 @@ The token volume is mounted as a directory so Kubernetes Secret projection
 updates are visible. During rotation, restart both backend deployments before
 the control plane stops accepting the previous token.
 
+For trusted private networks with the `service` chart, enable
+`gateway.trustedBackend.enabled: true` on the control plane, then set
+`global.loginMethod: none` and
+`global.serviceUrl: http://osmo-gateway-backend.osmo.svc.cluster.local` on the
+operator (adjust the gateway name and namespace to match the release).
+The dedicated ClusterIP entry point accepts operator WebSockets and read-only
+backend configuration requests without credentials. It overwrites identity
+headers with `osmo-backend` and applies role authorization when enabled.
+Public ingress and Cloudflare tunnels must continue to target `osmo-gateway`.
+The operator keeps its Kubernetes ServiceAccount and existing progress probes;
+a prolonged upstream outage can still trigger probe-driven restarts.
+This mode is implemented by the standalone `service` and `backend-operator`
+charts; it does not change the unified `osmo` chart's token configuration.
+
 ### Global NetworkPolicy Settings
 
 When enabled, a `NetworkPolicy` is applied to the workflow namespace (`global.backendNamespace`) that allows unrestricted external internet egress while blocking cross-namespace cluster traffic except to explicitly allowlisted namespaces.

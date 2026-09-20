@@ -817,6 +817,8 @@ data:
                       path: /var/config
         {{- end }}
 
+    {{- include "osmo.trusted-backend-listener" . | nindent 4 }}
+
   cds.yaml: |
     resources:
     - "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
