@@ -67,7 +67,7 @@ global:
   ##
   accountTokenSecretKey: token
 
-  ## Authentication method to use with OSMO service (password or token)
+  ## Authentication method: password, token, or none for a trusted internal gateway.
   ##
   loginMethod: password
 

@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+{{- $trusted := .Values.gateway.trustedBackend | default dict }}
+{{- if $trusted.enabled }}
+{{- if not (and .Values.gateway.envoy.enabled .Values.gateway.upstreams.agent.enabled) }}
+{{- fail "gateway.trustedBackend requires Envoy and the agent upstream" }}
+{{- end }}
+{{- $port := int ($trusted.port | default 10081) }}
+{{- if or (lt $port 1024) (gt $port 65535) (eq $port 9901) (eq $port (int .Values.gateway.envoy.listenerPort)) }}
+{{- fail "gateway.trustedBackend.port must be an unprivileged port distinct from the public listener and admin port" }}
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "osmo.gateway-name" . }}-backend
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: ClusterIP
+  ports:
+  - name: backend
+    port: 80
+    targetPort: {{ $port }}
+    protocol: TCP
+  selector:
+    {{- include "osmo.gateway-component-labels" (dict "component" "envoy" "context" .) | nindent 4 }}
+{{- end }}

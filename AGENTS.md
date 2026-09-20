@@ -124,6 +124,13 @@ bash deployments/charts/service/tests/render-tests.sh
 | `service/` | OSMO control-plane services, UI, gateway, and optional development dependencies. |
 | `backend-operator/` | Compute-plane backend listener, worker, test runner, RBAC, and scheduler integration. |
 
+The standalone `service` chart supports `gateway.trustedBackend.enabled` for a
+separate ClusterIP operator entry point without credential authentication.
+Pair it with `global.loginMethod: none` in `backend-operator`; public ingress
+continues to use the ordinary gateway. Validate this path with
+`bash deployments/charts/service/tests/render-tests.sh` and
+`bazel test //src/operator/utils/tests:test_login`.
+
 The GCP path of `deployments/scripts/deploy-osmo-minimal.sh` (`--provider gcp`) is
 the driver `deployments/scripts/gcp/terraform.sh`, backed by
 `deployments/terraform/gcp/example/`; object storage uses the `gcs` backend of

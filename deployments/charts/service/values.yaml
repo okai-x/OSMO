@@ -1938,6 +1938,12 @@ extraConfigMaps: []
 ## is updated — no pod restart required.
 ## ============================================================================
 gateway:
+  ## Credential-free operator entry point. Exposed only through a separate
+  ## ClusterIP Service; public ingress and tunnels must use the normal gateway.
+  trustedBackend:
+    enabled: false
+    port: 10081
+
   ## Name prefix for all gateway K8s resources (e.g. osmo-gateway-envoy)
   ##
   name: osmo-gateway

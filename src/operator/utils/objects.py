@@ -45,6 +45,10 @@ class BackendBaseConfig(logging.LoggingConfig, login.LoginConfig,
         default=None,
         description='Login method',
         json_schema_extra={'command_line': 'method'})
+    trust_network: bool = pydantic.Field(
+        default=False,
+        description='Connect without credentials to a trusted internal backend gateway.',
+        json_schema_extra={'command_line': 'trust_network'})
 
 
 class BackendListenerConfig(BackendBaseConfig, metrics.MetricsCreatorConfig):

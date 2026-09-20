@@ -63,5 +63,34 @@ class OperatorLoginTest(unittest.TestCase):
         self.assertTrue(refresh_id_token.call_args.kwargs['osmo_token'])
 
 
+class TrustedNetworkLoginTest(unittest.IsolatedAsyncioTestCase):
+    """Trusted-network operators never exchange or refresh credentials."""
+
+    async def test_start_and_reconnect_without_credentials(self) -> None:
+        config = objects.BackendBaseConfig(
+            namespace='osmo-workflows', trust_network=True,
+            token_file='/missing/token.txt')
+        with mock.patch.object(operator_login, 'get_login_info') as get_login_info, \
+                mock.patch.object(operator_login, 'refresh_id_token') as refresh_id_token:
+            for _ in range(2):
+                storage, headers = await operator_login.get_headers(config)
+                self.assertIsNone(storage)
+                self.assertEqual(headers, {})
+            get_login_info.assert_not_called()
+            refresh_id_token.assert_not_called()
+        self.assertIsNone(config.method)
+
+    def test_config_fetch_ignores_previous_login(self) -> None:
+        config = objects.BackendBaseConfig(
+            namespace='osmo-workflows', trust_network=True)
+        previous_login = login.LoginStorage(
+            url=config.service_url,
+            token_login=login.TokenLoginStorage(id_token='header.e30.signature'))
+        with mock.patch.object(operator_login, 'refresh_id_token') as refresh_id_token:
+            self.assertEqual(
+                operator_login.get_headers_and_login_info(config, previous_login), (None, {}))
+            refresh_id_token.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main()

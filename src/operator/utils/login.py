@@ -103,7 +103,9 @@ def refresh_id_token(
 def get_headers_and_login_info(
         config: objects.BackendBaseConfig,
         login_info: login.LoginStorage | None = None
-    ) -> Tuple[login.LoginStorage, Dict]:
+    ) -> Tuple[login.LoginStorage | None, Dict]:
+    if config.trust_network:
+        return None, {}
     if login_info:
         login_info = refresh_id_token(config, login_info)
     else:
@@ -120,7 +122,7 @@ def get_headers_and_login_info(
 
 async def get_headers(config: objects.BackendBaseConfig,
                       login_info: login.LoginStorage | None = None) \
-    -> Tuple[login.LoginStorage, Dict]:
+    -> Tuple[login.LoginStorage | None, Dict]:
     while True:
         try:
             login_info, headers = get_headers_and_login_info(config, login_info)
