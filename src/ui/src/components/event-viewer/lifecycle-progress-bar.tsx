@@ -17,7 +17,9 @@
 import { cn } from "@/lib/utils";
 import { type TaskGroup } from "@/lib/api/adapter/events/events-grouping";
 import { TaskGroupStatus } from "@/lib/api/generated";
+import { isTaskFailed, isTaskTerminal } from "@/lib/api/status-metadata.generated";
 import { useEventViewerContext } from "@/components/event-viewer/event-viewer-context";
+import { getStatusLabel } from "@/lib/workflows/workflow-status-primitives";
 
 /**
  * Visual lifecycle stages for the progress bar.
@@ -138,95 +140,106 @@ export function LifecycleProgressBar({ task, className }: LifecycleProgressBarPr
   const { isParentTerminal, taskStatus, taskStatuses } = useEventViewerContext();
   // Task scope: single taskStatus. Workflow scope: look up by name + retry.
   const effectiveTaskStatus = taskStatus ?? taskStatuses?.get(`${task.name}:${task.retryId}`);
+  const terminalTaskStatus =
+    effectiveTaskStatus !== undefined && isTaskTerminal(effectiveTaskStatus) ? effectiveTaskStatus : undefined;
   const { podPhase } = task.derived;
-  const isFailed = podPhase === "Failed";
-  const isPodTerminal = podPhase === "Succeeded" || isFailed;
+  const isFailed = terminalTaskStatus !== undefined ? isTaskFailed(terminalTaskStatus) : podPhase === "Failed";
+  const isPodTerminal = podPhase === "Succeeded" || podPhase === "Failed";
 
   let progressIdx = getProgressIndex(task);
 
-  // Infer completion when the parent entity is terminal but pod events are
-  // incomplete. If the last known pod phase is Running, we can confidently
-  // assume the pod completed — we just never received the terminal event.
-  const inferredDone = !isPodTerminal && !!isParentTerminal && podPhase === "Running";
+  // OSMO task outcomes take precedence when terminal pod events are missing.
+  // Fall back to parent-based inference only when the task status is unavailable.
+  const inferredDone =
+    terminalTaskStatus !== undefined
+      ? !isFailed
+      : effectiveTaskStatus === undefined && !isPodTerminal && !!isParentTerminal && podPhase === "Running";
   if (inferredDone) {
     progressIdx = 3; // All stages complete
   }
 
-  // Parent is terminal but pod never reached Running or a terminal phase.
-  // The task stopped without progressing further (e.g., canceled while in
-  // Scheduling/Init). Show as "terminal" — same color as active but no pulse.
-  const showTerminal = !isPodTerminal && !inferredDone && !!isParentTerminal;
+  // Stopped tasks stay at the last observed stage without an active pulse.
+  // Known task failures use the failed segment state below.
+  const showTerminal = !isPodTerminal && !inferredDone && (terminalTaskStatus !== undefined || !!isParentTerminal);
 
-  // Determine final timeline color, overriding for inferred completion
-  // When inferredDone is true, show green (success) instead of blue (in-progress)
+  // Task outcomes override colors inferred from historical pod events.
   let timelineColor = task.derived.timelineColor;
-  if (inferredDone) {
+  if (isFailed) {
+    timelineColor = "red";
+  } else if (inferredDone) {
     timelineColor = "green";
   }
 
   return (
-    <div
-      className={cn("lifecycle-timeline", className)}
-      data-timeline-color={timelineColor}
-    >
-      {LIFECYCLE_STAGES.map((stage, idx) => {
-        let state: SegmentState;
+    <div className={className}>
+      {terminalTaskStatus !== undefined && (
+        <div className={cn("mb-1 text-xs font-medium", isFailed ? "text-destructive" : "text-muted-foreground")}>
+          {getStatusLabel(terminalTaskStatus)}
+        </div>
+      )}
+      <div
+        className="lifecycle-timeline"
+        data-timeline-color={timelineColor}
+      >
+        {LIFECYCLE_STAGES.map((stage, idx) => {
+          let state: SegmentState;
 
-        if (idx < progressIdx) {
-          // Stage before current: completed (observed) or inferred (no events)
-          const isObserved = task.derived.observedStageIndices.has(idx);
-          state = isObserved ? "done" : "inferred";
-        } else if (idx === progressIdx) {
-          if (isFailed) {
-            state = "failed";
-          } else if (inferredDone) {
-            state = "done";
-          } else if (showTerminal) {
-            state = "terminal";
+          if (idx < progressIdx) {
+            // Stage before current: completed (observed) or inferred (no events)
+            const isObserved = task.derived.observedStageIndices.has(idx);
+            state = isObserved ? "done" : "inferred";
+          } else if (idx === progressIdx) {
+            if (isFailed) {
+              state = "failed";
+            } else if (inferredDone) {
+              state = "done";
+            } else if (showTerminal) {
+              state = "terminal";
+            } else {
+              state = "active";
+            }
           } else {
-            state = "active";
+            state = "inactive";
           }
-        } else {
-          state = "inactive";
-        }
 
-        const isLastStage = idx === LIFECYCLE_STAGES.length - 1;
+          const isLastStage = idx === LIFECYCLE_STAGES.length - 1;
 
-        // K8s events race ahead of Postgres: when the running dot is active,
-        // terminal (parent stopped before OSMO confirmed), or failed — show the
-        // correct label rather than the static "Running" fallback.
-        const effectiveLabel =
-          stage.key === "running" && (state === "active" || state === "terminal" || state === "failed")
-            ? getRunningStageLabel(state, effectiveTaskStatus)
-            : stage.label;
+          // K8s events race ahead of Postgres: when the running dot is active,
+          // terminal (parent stopped before OSMO confirmed), or failed — show the
+          // correct label rather than the static "Running" fallback.
+          const effectiveLabel =
+            stage.key === "running" && (state === "active" || state === "terminal" || state === "failed")
+              ? getRunningStageLabel(state, effectiveTaskStatus)
+              : stage.label;
 
-        return (
-          <div
-            key={stage.key}
-            className={cn("timeline-step", isLastStage && "timeline-step-last")}
-          >
-            <TimelineDot
-              stage={stage.key}
-              state={state}
-              showPulse={state === "active" && !isPodTerminal}
-            />
-            {!isLastStage && (
-              <div className="timeline-line">
-                <div
-                  className="timeline-line-fill"
-                  style={{ transform: `scaleX(${idx < progressIdx ? 1 : 0})` }}
-                />
-              </div>
-            )}
-            <span
-              className="timeline-label"
-              data-state={state}
+          return (
+            <div
+              key={stage.key}
+              className={cn("timeline-step", isLastStage && "timeline-step-last")}
             >
-              {effectiveLabel}
-            </span>
-          </div>
-        );
-      })}
+              <TimelineDot
+                stage={stage.key}
+                state={state}
+                showPulse={state === "active" && !isPodTerminal}
+              />
+              {!isLastStage && (
+                <div className="timeline-line">
+                  <div
+                    className="timeline-line-fill"
+                    style={{ transform: `scaleX(${idx < progressIdx ? 1 : 0})` }}
+                  />
+                </div>
+              )}
+              <span
+                className="timeline-label"
+                data-state={state}
+              >
+                {effectiveLabel}
+              </span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
