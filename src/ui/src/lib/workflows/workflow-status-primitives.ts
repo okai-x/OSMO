@@ -35,6 +35,20 @@ export const WORKFLOW_STATUS_LABELS: Record<WorkflowStatusType, string> = {
   [WorkflowStatus.FAILED_PREEMPTED]: "Failed: Preempted",
 };
 
+export const STATUS_LABELS: Record<string, string> = {
+  ...WORKFLOW_STATUS_LABELS,
+  RESCHEDULED: "Rescheduled",
+  INITIALIZING: "Initializing",
+  FAILED_UPSTREAM: "Failed: Upstream",
+  SCHEDULING: "Scheduling",
+  SUBMITTING: "Submitting",
+  PROCESSING: "Processing",
+} as const;
+
+export function getStatusLabel(status: string): string {
+  return STATUS_LABELS[status] ?? status;
+}
+
 export const WORKFLOW_STATUS_UI_STYLES = {
   waiting: {
     bg: "bg-gray-100 dark:bg-zinc-800/60",
