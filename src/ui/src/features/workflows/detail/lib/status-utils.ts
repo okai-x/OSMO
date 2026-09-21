@@ -28,7 +28,7 @@ import {
   isTaskTerminal,
   isTaskInQueue,
 } from "@/lib/api/status-metadata.generated";
-import { WORKFLOW_STATUS_LABELS } from "@/lib/workflows/workflow-status-primitives";
+export { STATUS_LABELS, getStatusLabel } from "@/lib/workflows/workflow-status-primitives";
 
 export type { StatusCategory };
 export { TASK_STATUS_METADATA, getTaskStatusCategory, isTaskFailed, isTaskOngoing, isTaskTerminal, isTaskInQueue };
@@ -100,16 +100,6 @@ export const STATUS_DESCRIPTIONS: Record<TaskGroupStatus | WorkflowStatus, strin
   FAILED_SUBMISSION: "Failed to submit due to resource or credential validation failure.",
 } as const;
 
-export const STATUS_LABELS: Record<string, string> = {
-  ...WORKFLOW_STATUS_LABELS,
-  RESCHEDULED: "Rescheduled",
-  INITIALIZING: "Initializing",
-  FAILED_UPSTREAM: "Failed: Upstream",
-  SCHEDULING: "Scheduling",
-  SUBMITTING: "Submitting",
-  PROCESSING: "Processing",
-} as const;
-
 export type StateCategory = "completed" | "running" | "failed" | "pending";
 
 function buildStateCategories(): Record<StateCategory, Set<string>> {
@@ -147,10 +137,6 @@ export const STATE_CATEGORY_NAMES: StateCategory[] = ["completed", "running", "f
 
 export function getStatusCategory(status: string): StatusCategory {
   return STATUS_CATEGORY_MAP[status] ?? "failed";
-}
-
-export function getStatusLabel(status: string): string {
-  return STATUS_LABELS[status] ?? status;
 }
 
 // `color` and `strokeColor` are hex values needed for ReactFlow edges/minimap
