@@ -88,6 +88,83 @@ function renderTimeline(
 }
 
 describe("LifecycleProgressBar terminal status", () => {
+  it("shows queue timeout after reload with only historical scheduling events", () => {
+    const task = makeTask("Pending", [makeEvent("PodScheduled", "scheduling", "error")]);
+    const container = renderTimeline(task, {
+      isParentTerminal: true,
+      taskStatus: TaskGroupStatus.FAILED_QUEUE_TIMEOUT,
+    });
+
+    expect(container.textContent).toContain("Failed: Queue Timeout");
+    expect(container.textContent).toContain("Scheduling");
+    expect(container.querySelector('[data-stage="scheduling"]')?.getAttribute("data-state")).toBe("failed");
+    expect(container.querySelector('[data-stage="init"]')?.getAttribute("data-state")).toBe("inactive");
+    expect(container.querySelector('[data-state="active"]')).toBeNull();
+    expect(container.querySelector('[class*="dot-pulse"]')).toBeNull();
+  });
+
+  it("uses the matching task attempt status even while the workflow is ongoing", () => {
+    const task = { ...makeTask("Pending", [makeEvent("FailedScheduling", "scheduling", "error")]), retryId: 1 };
+    const container = renderTimeline(task, {
+      isParentTerminal: false,
+      taskStatuses: new Map([
+        ["worker_0:0", TaskGroupStatus.RESCHEDULED],
+        ["worker_0:1", TaskGroupStatus.FAILED_QUEUE_TIMEOUT],
+      ]),
+    });
+
+    expect(container.textContent).toContain("Failed: Queue Timeout");
+    expect(container.querySelector('[data-stage="scheduling"]')?.getAttribute("data-state")).toBe("failed");
+    expect(container.querySelector('[data-state="active"]')).toBeNull();
+  });
+
+  it("does not infer successful completion when OSMO reports execution timeout", () => {
+    const task = makeTask("Running", [makeEvent("Started", "container")]);
+    const container = renderTimeline(task, {
+      isParentTerminal: true,
+      taskStatus: TaskGroupStatus.FAILED_EXEC_TIMEOUT,
+    });
+
+    expect(container.textContent).toContain("Failed: Exec Timeout");
+    expect(container.querySelector('[data-stage="running"]')?.getAttribute("data-state")).toBe("failed");
+    expect(container.querySelector('[data-stage="done"]')?.getAttribute("data-state")).toBe("inactive");
+    expect(container.querySelector(".lifecycle-timeline")?.getAttribute("data-timeline-color")).toBe("red");
+  });
+
+  it("shows cancellation at the last observed stage", () => {
+    const task = makeTask("Pending", [makeEvent("FailedScheduling", "scheduling", "error")]);
+    const container = renderTimeline(task, {
+      isParentTerminal: true,
+      taskStatus: TaskGroupStatus.FAILED_CANCELED,
+    });
+
+    expect(container.textContent).toContain("Failed: Canceled");
+    expect(container.querySelector('[data-stage="scheduling"]')?.getAttribute("data-state")).toBe("failed");
+    expect(container.querySelector('[class*="dot-pulse"]')).toBeNull();
+  });
+
+  it("shows successful completion when the final pod event is missing", () => {
+    const task = makeTask("Running", [makeEvent("Started", "container")]);
+    const container = renderTimeline(task, { isParentTerminal: false, taskStatus: TaskGroupStatus.COMPLETED });
+
+    expect(container.textContent).toContain("Completed");
+    expect(container.querySelector('[data-stage="done"]')?.getAttribute("data-state")).toBe("done");
+    expect(container.querySelector(".lifecycle-timeline")?.getAttribute("data-timeline-color")).toBe("green");
+    expect(container.querySelector('[class*="dot-pulse"]')).toBeNull();
+  });
+
+  it("prioritizes the task failure over a successful pod event", () => {
+    const task = makeTask("Succeeded", [makeEvent("Completed", "completion")]);
+    const container = renderTimeline(task, {
+      isParentTerminal: true,
+      taskStatus: TaskGroupStatus.FAILED_BACKEND_ERROR,
+    });
+
+    expect(container.textContent).toContain("Failed: Backend Error");
+    expect(container.querySelector('[data-stage="done"]')?.getAttribute("data-state")).toBe("failed");
+    expect(container.querySelector(".lifecycle-timeline")?.getAttribute("data-timeline-color")).toBe("red");
+  });
+
   it("does not apply another attempt's terminal status", () => {
     const task = { ...makeTask("Pending", [makeEvent("FailedScheduling", "scheduling", "error")]), retryId: 1 };
     const container = renderTimeline(task, {
