@@ -15,7 +15,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "vitest";
-import { getProgressIndex, getRunningStageLabel } from "@/components/event-viewer/lifecycle-progress-bar";
+import type { ComponentProps } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import {
+  getProgressIndex,
+  getRunningStageLabel,
+  LifecycleProgressBar,
+} from "@/components/event-viewer/lifecycle-progress-bar";
+import { EventViewerProvider } from "@/components/event-viewer/event-viewer-context";
 import type { TaskGroup } from "@/lib/api/adapter/events/events-grouping";
 import type { K8sEvent, PodPhase, LifecycleStage, EventSeverity } from "@/lib/api/adapter/events/events-types";
 import { computeDerivedState, type TaskDerivedState } from "@/lib/api/adapter/events/events-derived-state";
@@ -66,6 +73,49 @@ function makeTask(podPhase: PodPhase, events: K8sEvent[]): TaskGroup {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+function renderTimeline(
+  task: TaskGroup,
+  context: Omit<ComponentProps<typeof EventViewerProvider>, "children">,
+): HTMLDivElement {
+  const container = document.createElement("div");
+  container.innerHTML = renderToStaticMarkup(
+    <EventViewerProvider {...context}>
+      <LifecycleProgressBar task={task} />
+    </EventViewerProvider>,
+  );
+  return container;
+}
+
+describe("LifecycleProgressBar terminal status", () => {
+  it("does not apply another attempt's terminal status", () => {
+    const task = { ...makeTask("Pending", [makeEvent("FailedScheduling", "scheduling", "error")]), retryId: 1 };
+    const container = renderTimeline(task, {
+      isParentTerminal: false,
+      taskStatuses: new Map([["worker_0:0", TaskGroupStatus.FAILED_QUEUE_TIMEOUT]]),
+    });
+
+    expect(container.textContent).not.toContain("Failed: Queue Timeout");
+    expect(container.querySelector('[data-stage="scheduling"]')?.getAttribute("data-state")).toBe("active");
+  });
+
+  it.each([
+    {
+      status: TaskGroupStatus.SCHEDULING,
+      event: makeEvent("FailedScheduling", "scheduling", "error"),
+      stage: "scheduling",
+    },
+    { status: TaskGroupStatus.INITIALIZING, event: makeEvent("Pulling", "image"), stage: "init" },
+    { status: TaskGroupStatus.RUNNING, event: makeEvent("Started", "container"), stage: "running" },
+  ])("preserves active $stage progress", ({ status, event, stage }) => {
+    const task = makeTask(status === TaskGroupStatus.RUNNING ? "Running" : "Pending", [event]);
+    const container = renderTimeline(task, { isParentTerminal: false, taskStatus: status });
+
+    expect(container.textContent).toBe("SchedulingInitRunningDone");
+    expect(container.querySelector(`[data-stage="${stage}"]`)?.getAttribute("data-state")).toBe("active");
+    expect(container.querySelector('[class*="dot-pulse"]')).not.toBeNull();
+  });
+});
 
 describe("getRunningStageLabel", () => {
   it("returns 'Running' when taskStatus is undefined (workflow scope, no OSMO status available)", () => {
